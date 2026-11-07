@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Gates</string>
+    <string name="accessibility_label">Gates: gate opens from notifications and recents</string>
+    <string name="accessibility_description">Gates uses this to see which app comes to the front, so it can show that app\'s gate when you open it from a notification or recents, hide the timer during full-screen video and games, and fade the screen at time\'s up in Still mode. Gates does not read what is inside other apps, and nothing leaves your phone.</string>
+</resources>
