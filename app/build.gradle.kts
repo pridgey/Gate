@@ -12,8 +12,10 @@ android {
         applicationId = "dev.pridgey.gates"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes the run number so every build installs as an update.
+        val build = (project.findProperty("buildNumber") as String?)?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "0.1.$build"
     }
 
     // One fixed debug key for local and CI builds, so CI APKs install over each other

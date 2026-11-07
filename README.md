@@ -7,8 +7,9 @@ An Android launcher that puts friction only where you ask for it. See
 
 ## Get the APK
 
-Every push runs `.github/workflows/build-apk.yml`, which builds a debug APK and
-attaches it to the run as an artifact (Actions tab → run → Artifacts).
+Every push to `main` publishes a GitHub Release (`v0.1.<run number>`) with the APK
+attached; see the repo's Releases page. Pushes to other branches build the APK as a run
+artifact only (Actions tab → run → Artifacts).
 
 Build locally (needs JDK 17 and the Android SDK):
 
