@@ -31,6 +31,8 @@ interface GatesActions {
     fun deleteGroup(id: String): Any
 }
 
+const val MAX_FAVORITES = 8
+
 class LauncherViewModel(app: Application) : AndroidViewModel(app), GatesActions {
     private val ctx get() = getApplication<Application>()
     private val store = app.store
@@ -123,8 +125,17 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app), GatesActions 
         else c.copy(reasons = c.reasons + reason)
     }
 
-    fun toggleHome(pkg: String) = store.update {
-        if (pkg in it.home) it.copy(home = it.home - pkg) else it.copy(home = it.home + pkg)
+    /** Favorites are the apps listed on home. Returns false when home is full. */
+    fun toggleFavorite(pkg: String): Boolean {
+        var added = true
+        store.update {
+            when {
+                pkg in it.home -> it.copy(home = it.home - pkg)
+                it.home.size >= MAX_FAVORITES -> { added = false; it }
+                else -> it.copy(home = it.home + pkg)
+            }
+        }
+        return added
     }
 
     fun toggleDock(pkg: String) = store.update {

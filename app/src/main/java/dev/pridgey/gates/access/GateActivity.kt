@@ -7,8 +7,6 @@ import android.os.CancellationSignal
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.core.graphics.drawable.toBitmap
 import dev.pridgey.gates.Gates
 import dev.pridgey.gates.data.GateType
 import dev.pridgey.gates.data.LaunchApp
@@ -28,7 +26,7 @@ class GateActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pkg = intent.getStringExtra(EXTRA_PKG) ?: return finish()
-        val app = loadApp(pkg) ?: return finish()
+        val app = dev.pridgey.gates.data.Apps.forPackage(this, pkg) ?: return finish()
         val state = store.state.value
         val cfg = state.config(pkg)
         val usage = Gates.usage(this)
@@ -56,7 +54,7 @@ class GateActivity : ComponentActivity() {
                         app = app,
                         config = cfg,
                         remaining = remaining,
-                        intro = "Opened from outside the home screen.",
+                        intro = null,
                         onPick = { minutes, reason ->
                             Gates.startSession(this, pkg, app.label, minutes, reason)
                             allow(pkg)
@@ -103,16 +101,6 @@ class GateActivity : ComponentActivity() {
         super.onUserLeaveHint()
         cancel()
     }
-
-    private fun loadApp(pkg: String): LaunchApp? = runCatching {
-        val ai = packageManager.getApplicationInfo(pkg, 0)
-        LaunchApp(
-            pkg = pkg,
-            label = packageManager.getApplicationLabel(ai).toString(),
-            component = packageManager.getLaunchIntentForPackage(pkg)?.component,
-            icon = runCatching { packageManager.getApplicationIcon(pkg).toBitmap(144, 144).asImageBitmap() }.getOrNull(),
-        )
-    }.getOrNull()
 
     companion object {
         const val EXTRA_PKG = "pkg"

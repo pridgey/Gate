@@ -59,6 +59,13 @@ object Days {
     }
 }
 
+/** For sentences: "5 min", "1 hr", "1 hr 30 min". */
+fun spokenMinutes(m: Int): String = when {
+    m < 60 -> "$m min"
+    m % 60 == 0 -> "${m / 60} hr"
+    else -> "${m / 60} hr ${m % 60} min"
+}
+
 fun formatMinutes(m: Int): String = when {
     m < 60 -> "${m}m"
     m % 60 == 0 -> "${m / 60}h"

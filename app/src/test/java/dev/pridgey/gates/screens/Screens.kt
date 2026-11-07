@@ -120,6 +120,7 @@ class Screens {
                     progress = { 1f }, apps = allApps, gateOf = { state.config(it).gate },
                     remainingOf = { Limits.remaining(state, it, usage) },
                     tagFor = { if (it == chess.pkg) "Upstairs" else null },
+                    isFavorite = { it in state.home },
                     onOpen = {}, onOptions = {}, onSettings = {}, onDrag = {}, onRelease = {},
                 )
             }

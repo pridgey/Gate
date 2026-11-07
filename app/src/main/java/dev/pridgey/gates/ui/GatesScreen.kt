@@ -120,7 +120,7 @@ fun GatesScreen(
 
             if (!settings.gatesIntroSeen) item {
                 Note(
-                    "Gates puts a pause only where you ask for one. Long-press any app on home to give it a gate, a limit or a group.",
+                    "Gates puts a pause only where you ask for one. Long-press any app to give it a gate, a limit or a group, or to make it a favorite on home.",
                     "Got it",
                 ) { vm.updateSettings { it.copy(gatesIntroSeen = true) } }
             }

@@ -162,6 +162,17 @@ fun LauncherRoot(
     }
 
     val anyPanel = upstairs || gatesApp || diagnostics
+
+    // Dark status and nav icons only over the light Gates screens; light everywhere else.
+    val lightSurface = (gatesApp || diagnostics) && !androidx.compose.foundation.isSystemInDarkTheme() && !LocalStill.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = lightSurface
+            isAppearanceLightNavigationBars = lightSurface
+        }
+    }
     val homeFade by androidx.compose.animation.core.animateFloatAsState(if (anyPanel) 0f else 1f, tween(220), label = "homeFade")
 
     Box(Modifier.fillMaxSize()) {
@@ -203,6 +214,7 @@ fun LauncherRoot(
                 apps = apps.filter(visible),
                 gateOf = { state.config(it).gate },
                 remainingOf = { vm.remaining(it) },
+                isFavorite = { it in state.home },
                 tagFor = { pkg ->
                     when {
                         pkg !in upstairsPkgs -> null
@@ -288,7 +300,11 @@ fun LauncherRoot(
             onDock = o.app.pkg in state.dock,
             remaining = vm.remaining(o.app.pkg),
             onChange = { vm.updateApp(o.app.pkg, it) },
-            onToggleHome = { vm.toggleHome(o.app.pkg) },
+            onToggleHome = {
+                if (!vm.toggleFavorite(o.app.pkg)) {
+                    android.widget.Toast.makeText(context, "Home holds $MAX_FAVORITES favorites. Remove one first.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
             onToggleDock = { vm.toggleDock(o.app.pkg) },
             onRearrange = { overlay = null; closeDrawer(); gatesApp = false; upstairs = false; editHome = true },
             onNewGroup = vm::newGroup,
@@ -390,6 +406,16 @@ internal fun Home(
                 if (editing) {
                     EditableList(homeApps.take(fits), onMove, onDoneEditing)
                 } else {
+                    if (homeApps.isEmpty()) {
+                        Column {
+                            Text("Your favorites live here", style = MaterialTheme.typography.headlineMedium, color = ink.secondary)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Swipe up, long-press an app and tap Favorite.",
+                                style = MaterialTheme.typography.bodyLarge, color = ink.faint,
+                            )
+                        }
+                    }
                     Column {
                         homeApps.take(fits).forEach { app ->
                             HomeRow(app, gateOf(app.pkg), remainingOf(app.pkg), { onOpen(app) }, { onOptions(app) })
@@ -490,6 +516,7 @@ private fun EditableList(apps: List<LaunchApp>, onMove: (String, Int) -> Unit, o
     val ink = LocalInk.current
     val rowPx = with(LocalDensity.current) { 52.dp.toPx() }
     Column {
+        Text("DRAG TO REORDER FAVORITES", style = MaterialTheme.typography.labelSmall, color = ink.faint, modifier = Modifier.padding(bottom = 8.dp))
         apps.forEachIndexed { index, app ->
             var dy by remember(app.pkg, index) { mutableFloatStateOf(0f) }
             Row(
@@ -534,6 +561,7 @@ internal fun AllApps(
     gateOf: (String) -> GateType,
     remainingOf: (String) -> Int?,
     tagFor: (String) -> String?,
+    isFavorite: (String) -> Boolean,
     onOpen: (LaunchApp) -> Unit,
     onOptions: (LaunchApp) -> Unit,
     onSettings: (() -> Unit)?,
@@ -554,10 +582,9 @@ internal fun AllApps(
             .sortedBy { if (it.label.startsWith(q, ignoreCase = true)) 0 else 1 }
     }
 
-    // Open the keyboard once fully up; drop it as soon as the list starts to close.
+    // Search only opens when tapped; drop the keyboard as soon as the list starts to close.
     LaunchedEffect(Unit) {
         snapshotFlow { progress() }.collect { p ->
-            if (p >= 0.999f) runCatching { focus.requestFocus() }
             if (p < 0.95f) { keyboard?.hide(); focusManager.clearFocus() }
             if (p <= 0.001f) query = ""
         }
@@ -609,6 +636,14 @@ internal fun AllApps(
                 modifier = Modifier.weight(1f).fillMaxWidth().nestedScroll(connection),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 28.dp, end = 28.dp, top = 32.dp, bottom = 16.dp),
             ) {
+                if (query.isBlank()) {
+                    item(key = "hint") {
+                        Text(
+                            "Long-press an app to gate it or make it a favorite.",
+                            style = MaterialTheme.typography.bodySmall, color = ink.faint,
+                        )
+                    }
+                }
                 if (shown.isEmpty()) {
                     item { Text("Nothing called “$query”", style = MaterialTheme.typography.titleLarge, color = ink.secondary) }
                 }
@@ -625,14 +660,16 @@ internal fun AllApps(
                         }
                     }
                     item(key = app.pkg) {
-                        DrawerRow(app, gateOf(app.pkg), remainingOf(app.pkg), tagFor(app.pkg), { onOpen(app) }, { onOptions(app) })
+                        DrawerRow(app, gateOf(app.pkg), remainingOf(app.pkg), tagFor(app.pkg), { onOpen(app) }, { onOptions(app) }, isFavorite(app.pkg))
                     }
                 }
             }
             // Search sits where the thumb is.
             Row(
                 Modifier.padding(horizontal = 20.dp, vertical = 12.dp).fillMaxWidth().height(52.dp)
-                    .clip(RoundedCornerShape(50)).background(ink.primary.copy(alpha = 0.10f)).padding(start = 18.dp, end = 6.dp),
+                    .clip(RoundedCornerShape(50)).background(ink.primary.copy(alpha = 0.10f))
+                    .pressable { runCatching { focus.requestFocus() }; keyboard?.show() }
+                    .padding(start = 18.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Outlined.Search, null, tint = ink.secondary, modifier = Modifier.size(20.dp))
@@ -678,6 +715,7 @@ private fun DrawerRow(
     tag: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    favorite: Boolean = false,
 ) {
     val ink = LocalInk.current
     Row(
@@ -693,6 +731,7 @@ private fun DrawerRow(
             Marks(gate, remaining, ink.secondary, Modifier.padding(start = 10.dp))
         }
         if (tag != null) Text(tag.uppercase(), style = MaterialTheme.typography.labelSmall, color = ink.faint)
+        else if (favorite) StarMark(true, ink.faint, 13.dp)
     }
 }
 

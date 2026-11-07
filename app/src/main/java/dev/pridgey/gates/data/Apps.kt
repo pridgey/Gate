@@ -39,6 +39,18 @@ object Apps {
         return (apps + gatesTile(context)).sortedBy { it.label.lowercase() }
     }
 
+    /** One app by package name, for sheets shown outside the launcher. */
+    fun forPackage(context: Context, pkg: String): LaunchApp? = runCatching {
+        val pm = context.packageManager
+        val ai = pm.getApplicationInfo(pkg, 0)
+        LaunchApp(
+            pkg = pkg,
+            label = pm.getApplicationLabel(ai).toString(),
+            component = pm.getLaunchIntentForPackage(pkg)?.component,
+            icon = runCatching { pm.getApplicationIcon(pkg).toBitmap(144, 144).asImageBitmap() }.getOrNull(),
+        )
+    }.getOrNull()
+
     fun gatesTile(context: Context) = LaunchApp(context.packageName, "Gates", null, null)
 
     /** Default dialer, messages, browser and camera, for the first-run dock. */

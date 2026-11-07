@@ -54,6 +54,7 @@ import dev.pridgey.gates.data.LaunchApp
 import dev.pridgey.gates.data.Limits
 import dev.pridgey.gates.data.Reason
 import dev.pridgey.gates.data.formatMinutes
+import dev.pridgey.gates.data.spokenMinutes
 
 /** STILL-3: one paced breath (about 4s in, 6s out). Purely visual; never blocks a choice. */
 @Composable
@@ -77,7 +78,11 @@ private fun BreathRing() {
     }
 }
 
-/** GATE-1 / GATE-3: the Pause and Ask first sheets. */
+/**
+ * GATE-1 / GATE-3: the Pause and Ask first sheets.
+ * Reads top to bottom as one guided step: which app, one plain question, what happens
+ * next, then choices that each say what they do. Still one tap to open.
+ */
 @Composable
 fun GateSheet(
     app: LaunchApp,
@@ -88,27 +93,40 @@ fun GateSheet(
     onSaveReason: (Reason) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val ask = config.gate == GateType.ASK
     GSheet(onDismiss = onCancel) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Eyebrow(if (config.gate == GateType.ASK) "Ask first" else "Pause", config.gate)
-            SheetTitle(app.label, remaining?.let { "${formatMinutes(it)} left today" })
-            intro?.let {
-                Spacer(Modifier.height(12.dp))
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            SheetAppHeader(
+                app,
+                listOfNotNull(if (ask) "Ask first" else "Pause", remaining?.let { "${spokenMinutes(it)} left today" }).joinToString(" · "),
+                trailing = { GateMark(config.gate, MaterialTheme.colorScheme.primary, 18.dp) },
+            )
+            Text(
+                if (ask) "What are you opening ${app.label} for?" else "How long do you need ${app.label}?",
+                style = MaterialTheme.typography.displaySmall,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                intro ?: if (ask) {
+                    "Pick a reason and it opens for that long. When time's up, Gates reminds you what you came for."
+                } else {
+                    "Pick a time and it opens. When time's up, Gates asks you to close it."
+                },
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (LocalStill.current) BreathRing() else Spacer(Modifier.height(24.dp))
 
-            if (config.gate == GateType.ASK) {
+            if (ask) {
                 AskChoices(config, remaining, onPick, onSaveReason)
             } else {
                 Text(
-                    "How long?", style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 12.dp),
+                    "Open for", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp),
                 )
                 TimeChoices(Limits.choices(config.pauseChoices, remaining)) { onPick(it, null) }
             }
-            Spacer(Modifier.height(12.dp))
-            QuietButton("Not now", Modifier.fillMaxWidth(), onClick = onCancel)
+            Spacer(Modifier.height(16.dp))
+            QuietButton("Don't open", Modifier.fillMaxWidth(), onClick = onCancel)
         }
     }
 }
@@ -121,7 +139,6 @@ private fun AskChoices(
     onSaveReason: (Reason) -> Unit,
 ) {
     val haptics = rememberHaptics()
-    Text("What's it for?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp))
     var typed by remember { mutableStateOf("") }
     GroupCard {
         config.reasons.forEachIndexed { i, r ->
@@ -130,7 +147,8 @@ private fun AskChoices(
             val all = remaining != null && r.minutes >= remaining
             RowItem(
                 title = r.label,
-                value = if (all) "all ${formatMinutes(m)}" else formatMinutes(m),
+                subtitle = if (all) "Opens for the ${spokenMinutes(m)} you have left" else "Opens for ${spokenMinutes(m)}",
+                chevron = true,
                 onClick = { haptics.confirm(); onPick(m, r.label) },
             )
         }
@@ -139,7 +157,10 @@ private fun AskChoices(
     }
     AnimatedVisibility(typed.isNotBlank(), enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
         Column {
-            Spacer(Modifier.height(12.dp))
+            Text(
+                "Open for", style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
+            )
             TimeChoices(Limits.choices(listOf(5, 10, 15), remaining)) { m ->
                 val reason = typed.trim()
                 onSaveReason(Reason(reason, m))
@@ -175,11 +196,11 @@ private fun InlineField(value: String, placeholder: String, onChange: (String) -
 @Composable
 fun OutOfTimeSheet(app: LaunchApp, backAt: String, onBorrow: (Int) -> Unit, onDismiss: () -> Unit) {
     GSheet(onDismiss = onDismiss) {
-        Eyebrow("Out of time")
-        SheetTitle("${app.label} is resting", "$backAt.")
-        Spacer(Modifier.height(8.dp))
+        SheetAppHeader(app, "Out of time today")
+        Text("${app.label} is resting until tomorrow", style = MaterialTheme.typography.displaySmall)
+        Spacer(Modifier.height(10.dp))
         Text(
-            "If you need it now, you can borrow from tomorrow's time.",
+            "$backAt. If you really need it now, you can borrow a little from tomorrow's time.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(28.dp))
@@ -209,17 +230,11 @@ fun AppOptionsSheet(
     var newGroup by remember { mutableStateOf(false) }
     GSheet(onDismiss = onDismiss) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AppGlyph(app, 44.dp)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(app.label, style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        remaining?.let { "${formatMinutes(it)} left today" } ?: "No daily limit",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            SheetAppHeader(
+                app,
+                remaining?.let { "${spokenMinutes(it)} left today" } ?: "No daily limit",
+                trailing = { FavoriteButton(onHome, onToggleHome) },
+            )
 
             SectionTitle("Gate")
             Segmented(GateType.entries, config.gate, { if (it == GateType.ASK) "Ask" else it.title }) { g ->
@@ -274,11 +289,9 @@ fun AppOptionsSheet(
                 RowItem(if (config.manualUpstairs) "Bring down from Upstairs" else "Move Upstairs") {
                     onChange { it.copy(manualUpstairs = !it.manualUpstairs) }
                 }
-                CardDivider()
-                RowItem(if (onHome) "Remove from home" else "Add to home", onClick = onToggleHome)
                 if (onHome) {
                     CardDivider()
-                    RowItem("Rearrange home", chevron = true, onClick = onRearrange)
+                    RowItem("Rearrange favorites", chevron = true, onClick = onRearrange)
                 }
                 CardDivider()
                 RowItem(if (onDock) "Remove from the bottom row" else "Add to the bottom row", onClick = onToggleDock)
@@ -377,9 +390,31 @@ fun GroupSheet(
 /** A quoted reason, used on time's up. */
 @Composable
 fun ReasonQuote(reason: String) {
-    Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(2.dp).height(22.dp).background(MaterialTheme.colorScheme.primary))
-        Spacer(Modifier.width(12.dp))
-        Text("You came to: $reason", style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+    Column(
+        Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        Text("YOU CAME TO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Text(reason, style = MaterialTheme.typography.titleLarge, fontStyle = FontStyle.Italic)
+    }
+}
+
+/** Favorite toggle: favorites are the apps on the home screen. */
+@Composable
+private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit) {
+    val haptics = rememberHaptics()
+    val bg by androidx.compose.animation.animateColorAsState(
+        if (favorite) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh, label = "fav",
+    )
+    val fg = if (favorite) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(bg).pressable { haptics.confirm(); onToggle() }
+            .padding(start = 12.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StarMark(favorite, fg, 16.dp)
+        Spacer(Modifier.width(6.dp))
+        Text("Favorite", style = MaterialTheme.typography.labelMedium, color = fg)
     }
 }
