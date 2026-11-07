@@ -30,9 +30,13 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Name APK after the commit
+        run: mv app/build/outputs/apk/debug/app-debug.apk "gates-debug-${GITHUB_SHA::7}.apk"
+
+      # Uploaded unzipped, so the download is the installable APK itself.
       - name: Upload APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
-          name: gates-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/*.apk
+          path: gates-debug-*.apk
+          archive: false
           if-no-files-found: error
