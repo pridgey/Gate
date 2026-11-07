@@ -1,7 +1,10 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -18,18 +21,39 @@ android {
         versionName = "0.1.$build"
     }
 
-    // One fixed debug key for local and CI builds, so CI APKs install over each other
-    // and Essentials' pinned pairing with Gates survives updates.
+    // Gates' signing key never lives in the repo. CI gets it from secrets (SIGNING_* env vars);
+    // locally it's read from ~/.android/gates-signing/gates-signing.properties if present.
+    // Without either, builds use Android's standard debug key and can't update CI installs.
+    val signing: Map<String, String>? = run {
+        val env = System.getenv()
+        if (!env["SIGNING_STORE_FILE"].isNullOrBlank()) {
+            mapOf(
+                "storeFile" to env.getValue("SIGNING_STORE_FILE"),
+                "storePassword" to env["SIGNING_STORE_PASSWORD"].orEmpty(),
+                "keyAlias" to env["SIGNING_KEY_ALIAS"].orEmpty(),
+                "keyPassword" to env["SIGNING_KEY_PASSWORD"].orEmpty(),
+            )
+        } else {
+            val f = file("${System.getProperty("user.home")}/.android/gates-signing/gates-signing.properties")
+            if (f.exists()) Properties().apply { f.inputStream().use { load(it) } }
+                .entries.associate { it.key.toString() to it.value.toString() } else null
+        }
+    }
     signingConfigs {
-        getByName("debug") {
-            storeFile = rootProject.file("keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (signing != null) {
+            create("gates") {
+                storeFile = file(signing.getValue("storeFile"))
+                storePassword = signing["storePassword"]
+                keyAlias = signing["keyAlias"]
+                keyPassword = signing["keyPassword"]
+            }
         }
     }
 
     buildTypes {
+        debug {
+            if (signing != null) signingConfig = signingConfigs.getByName("gates")
+        }
         release {
             isMinifyEnabled = false
         }
@@ -60,4 +84,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
 
     testImplementation("junit:junit:4.13.2")
+}
+
+// Screenshot tests (Paparazzi) only run when asked: ./gradlew recordPaparazziDebug -Pscreens
+tasks.withType<Test>().configureEach {
+    if (!project.hasProperty("screens")) exclude("**/screens/**")
 }

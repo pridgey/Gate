@@ -1,38 +1,37 @@
 package dev.pridgey.gates.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,13 +40,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import dev.pridgey.gates.access.GateAccessibilityService
-import dev.pridgey.gates.island.GatesIslandService
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pridgey.gates.access.GateAccessibilityService
 import dev.pridgey.gates.data.Days
-import dev.pridgey.gates.timer.SoftExit
+import dev.pridgey.gates.data.DaySummary
 import dev.pridgey.gates.data.GateType
 import dev.pridgey.gates.data.GatesState
 import dev.pridgey.gates.data.Group
@@ -55,12 +55,16 @@ import dev.pridgey.gates.data.LaunchApp
 import dev.pridgey.gates.data.Limits
 import dev.pridgey.gates.data.TimerDisplay
 import dev.pridgey.gates.data.formatMinutes
+import dev.pridgey.gates.island.GatesIslandService
+import dev.pridgey.gates.timer.SoftExit
+import dev.pridgey.gates.update.Updater
 
-/** The Gates app (APP-1..4, SET-1): every gate, limit and group in one place. */
-@OptIn(ExperimentalLayoutApi::class)
+private enum class SettingSheet { RESET, STILL, TIMER, PICKER, UPDATE }
+
+/** The Gates app (APP-1..4, SET-1, WEEK-1, LEND-1): everything in one calm place. */
 @Composable
 fun GatesScreen(
-    vm: LauncherViewModel,
+    vm: GatesActions,
     state: GatesState,
     apps: List<LaunchApp>,
     usage: Map<String, Int>,
@@ -72,210 +76,225 @@ fun GatesScreen(
 ) {
     val context = LocalContext.current
     val settings = state.settings
-    var picker by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf<SettingSheet?>(null) }
     var editGroup by remember { mutableStateOf<Group?>(null) }
     var newGroup by remember { mutableStateOf(false) }
     val gated = apps.filter { state.config(it.pkg).gate != GateType.NONE }
     val ungated = apps.filter { state.config(it.pkg).gate == GateType.NONE && !it.isGates }
 
     LaunchedEffect(Unit) { vm.refreshUsage() }
-    // Re-read on every recomposition; returning from Settings triggers one via usage refresh.
+    // Re-read on recomposition; returning from Settings triggers one via the usage refresh.
     val a11yOn = GateAccessibilityService.isEnabled(context)
+    val overlayOn = Settings.canDrawOverlays(context)
+    val notificationsOn = context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         LazyColumn(
-            Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxSize().statusBarsPadding(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
         ) {
             item {
-                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Gates", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
+                Row(Modifier.padding(top = 28.dp, start = 4.dp), verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Gates", style = MaterialTheme.typography.displayMedium)
+                        Text(
+                            "${gated.size} gated · ${ungated.size} open as usual",
+                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer).pressable(onClick = onClose),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Outlined.Close, "Close", modifier = Modifier.size(20.dp))
+                    }
                 }
             }
+
+            item {
+                val update by Updater.state.collectAsStateWithLifecycle()
+                (update as? Updater.State.Available)?.let { a ->
+                    Note("Gates ${a.release.versionName} is ready to install.", "Update") { sheet = SettingSheet.UPDATE }
+                }
+            }
+
             if (!settings.gatesIntroSeen) item {
-                Notice(
-                    "Gates puts a pause only where you ask for one. Long-press any icon to give it a gate, a limit or a group.",
-                    action = "Got it",
+                Note(
+                    "Gates puts a pause only where you ask for one. Long-press any app on home to give it a gate, a limit or a group.",
+                    "Got it",
                 ) { vm.updateSettings { it.copy(gatesIntroSeen = true) } }
             }
-            if (!hasUsageAccess) item {
-                Notice("Daily limits need usage access, so Gates can see how long each app is open. Nothing leaves this phone.", "Allow") {
-                    context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-            }
-            if (!Settings.canDrawOverlays(context)) item {
-                Notice("Optional: allow Gates to show its timer pill and time's-up sheet over other apps.", "Allow") {
-                    context.startActivity(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }
 
-            if (!a11yOn) item {
-                Notice(
-                    "Opening an app from a notification or recents skips its gate. Gates can cover those too with an " +
-                        "accessibility service. It only sees which app is in front and whether the status bar is " +
-                        "showing, never what's inside apps, and nothing leaves this phone. It also hides the timer " +
-                        "during full-screen video and games.",
-                    "Turn on",
-                ) { GateAccessibilityService.openSettings(context) }
-            }
-
-            // APP-1: gated apps by gate type.
-            listOf(GateType.PAUSE, GateType.ASK, GateType.VAULT).forEach { type ->
-                val list = gated.filter { state.config(it.pkg).gate == type }
-                if (list.isNotEmpty()) {
-                    item { SectionLabel(type.title) }
-                    items(list, key = { "${type.name}-${it.pkg}" }) { app ->
-                        AppRow(app, state, usage, onClick = { onEditApp(app) })
-                    }
-                }
-            }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                    Text("${ungated.size} apps open as usual", Modifier.weight(1f))
-                    Button(onClick = { picker = true }) { Text("Add a gate") }
-                }
-            }
-
-            // WEEK-1: weekly summary. No scores, no streaks.
-            item { SectionLabel("This week") }
-            item { WeeklySummary(state, apps, usage) }
-
-            // APP-3: groups.
-            item { SectionLabel("Groups") }
-            items(state.groups, key = { "g-${it.id}" }) { g ->
-                val used = Limits.groupUsed(state, g.id, usage)
-                val members = apps.filter { state.config(it.pkg).groupId == g.id }.joinToString { it.label }
-                Column(Modifier.fillMaxWidth().clickable { editGroup = g }.padding(vertical = 6.dp)) {
-                    Text(g.name, style = MaterialTheme.typography.titleMedium)
-                    Text("$used / ${g.limit} min today", style = MaterialTheme.typography.bodySmall)
-                    if (members.isNotEmpty()) Text(members, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            item { OutlinedButton(onClick = { newGroup = true }) { Text("New group") } }
-
-            // SET-1: settings.
-            item { SectionLabel("Settings") }
-            item {
-                Column {
-                    Text("Limits reset at")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val shown = settings.pendingResetMinutes ?: settings.resetMinutes
-                        TextButton(onClick = { setReset(vm, shown - 15) }) { Text("−") }
-                        Text(Days.formatTime(shown), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { setReset(vm, shown + 15) }) { Text("+") }
-                    }
-                    if (settings.pendingResetMinutes != null) {
-                        Text(
-                            "Starts after the next reset (${Days.formatTime(settings.resetMinutes)}), so it can't refill today.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
-            item { SwitchRow("Still mode", "Calmer colours and a slow breath on gates.", settings.stillMode) { v -> vm.updateSettings { it.copy(stillMode = v) } } }
-            if (settings.stillMode) item {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = settings.stillFrom == null,
-                        onClick = { vm.updateSettings { it.copy(stillFrom = null) } },
-                        label = { Text("Always") },
-                    )
-                    listOf(20 * 60, 21 * 60, 22 * 60).forEach { m ->
-                        FilterChip(
-                            selected = settings.stillFrom == m,
-                            onClick = { vm.updateSettings { it.copy(stillFrom = m) } },
-                            label = { Text("${Days.formatTime(m)} to reset") },
-                        )
-                    }
-                }
-            }
-            if (settings.stillMode && !SoftExit.canGrayscale(context)) item {
-                Text(
-                    "Time's up fades to gray with an overlay. For true grayscale, run once from a computer: " +
-                        "adb shell pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            item {
-                Column {
-                    Text("Timer display")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TimerDisplay.entries.forEach { d ->
-                            FilterChip(
-                                selected = settings.timerDisplay == d,
-                                onClick = { vm.updateSettings { it.copy(timerDisplay = d) } },
-                                label = { Text(d.title) },
+            // Setup checklist: only while something is missing.
+            if (!hasUsageAccess || !a11yOn || !overlayOn || !notificationsOn) {
+                item { SectionTitle("Finish setting up") }
+                item {
+                    GroupCard {
+                        SetupRow("Usage access", "Needed for daily limits", hasUsageAccess) {
+                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                        CardDivider()
+                        SetupRow("Gate every way in", "From notifications and recents", a11yOn) {
+                            GateAccessibilityService.openSettings(context)
+                        }
+                        CardDivider()
+                        SetupRow("Show over other apps", "Timer pill and time's-up sheet", overlayOn) {
+                            context.startActivity(
+                                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                        CardDivider()
+                        SetupRow("Notifications", "The session timer", notificationsOn) {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                             )
                         }
                     }
                 }
             }
-            item { IslandStatus() }
+
+            // APP-1: gated apps.
+            item { SectionTitle("Gated apps") }
             item {
-                SwitchRow(
-                    "Gate opens from notifications and recents",
-                    if (a11yOn) "Uses the accessibility service." else "Turn on the accessibility service first.",
-                    settings.gateFromNotifications && a11yOn,
-                    enabled = a11yOn,
-                ) { v -> vm.updateSettings { it.copy(gateFromNotifications = v) } }
-            }
-            item {
-                SwitchRow("Show Gates on home", "You can always reach Gates from All apps.", settings.showGatesTile) { v ->
-                    vm.updateSettings { it.copy(showGatesTile = v) }
-                }
-            }
-            // LEND-1
-            item { SectionLabel("Lending") }
-            item {
-                SwitchRow(
-                    "Lend the phone",
-                    "Hides Vault apps, apps you mark \"Hide when lending\" and Gates itself. Ending it needs your fingerprint.",
-                    settings.lending,
-                ) { on ->
-                    if (on) {
-                        vm.updateSettings { it.copy(lending = true) }
-                        onClose()
-                    } else {
-                        onAuth("End lending") { vm.updateSettings { it.copy(lending = false) } }
+                GroupCard {
+                    if (gated.isEmpty()) {
+                        RowItem("No gates yet", subtitle = "Every app opens as usual")
+                        CardDivider()
                     }
+                    listOf(GateType.PAUSE, GateType.ASK, GateType.VAULT).forEach { type ->
+                        gated.filter { state.config(it.pkg).gate == type }.forEach { app ->
+                            GatedRow(app, state, usage) { onEditApp(app) }
+                            CardDivider()
+                        }
+                    }
+                    RowItem(
+                        "Add a gate", titleColor = MaterialTheme.colorScheme.primary,
+                        leading = { Icon(Icons.Outlined.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
+                    ) { sheet = SettingSheet.PICKER }
                 }
             }
 
-            item { SectionLabel("Diagnostics") }
-            item {
-                OutlinedButton(onClick = onDiagnostics) { Text("Timer & island diagnostics") }
-            }
-            item { Spacer(Modifier.height(32.dp)) }
-        }
-    }
+            // WEEK-1
+            item { SectionTitle("This week") }
+            item { WeeklyCard(state, apps, usage) }
 
-    if (picker) {
-        AlertDialog(
-            onDismissRequest = { picker = false },
-            title = { Text("Add a gate") },
-            text = {
-                LazyColumn {
-                    items(ungated, key = { it.pkg }) { app ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { picker = false; onEditApp(app) }.padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            AppGlyph(app, 32.dp)
-                            Spacer(Modifier.width(12.dp))
-                            Text(app.label)
+            // APP-3
+            item { SectionTitle("Shared limits") }
+            item {
+                GroupCard {
+                    state.groups.forEach { g ->
+                        val used = Limits.groupUsed(state, g.id, usage)
+                        val members = apps.filter { state.config(it.pkg).groupId == g.id }.joinToString { it.label }
+                        Column(Modifier.fillMaxWidth().pressable { editGroup = g }.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(g.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                                Text("$used of ${formatMinutes(g.limit)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Meter(used / g.limit.toFloat())
+                            if (members.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(members, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        CardDivider()
+                    }
+                    RowItem(
+                        "New group", titleColor = MaterialTheme.colorScheme.primary,
+                        leading = { Icon(Icons.Outlined.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
+                    ) { newGroup = true }
+                }
+            }
+
+            // SET-1
+            item { SectionTitle("Settings") }
+            item {
+                val island by GatesIslandService.attached.collectAsStateWithLifecycle()
+                GroupCard {
+                    RowItem(
+                        "Day starts at",
+                        value = Days.formatTime(settings.pendingResetMinutes ?: settings.resetMinutes),
+                        chevron = true,
+                    ) { sheet = SettingSheet.RESET }
+                    CardDivider()
+                    RowItem(
+                        "Still mode",
+                        value = when {
+                            !settings.stillMode -> "Off"
+                            settings.stillFrom == null -> "Always"
+                            else -> "From ${Days.formatTime(settings.stillFrom)}"
+                        },
+                        chevron = true,
+                    ) { sheet = SettingSheet.STILL }
+                    CardDivider()
+                    RowItem(
+                        "Timer",
+                        value = if (island && settings.timerDisplay in setOf(TimerDisplay.AUTOMATIC, TimerDisplay.ISLAND)) "On the island" else settings.timerDisplay.title,
+                        chevron = true,
+                    ) { sheet = SettingSheet.TIMER }
+                    CardDivider()
+                    ToggleRow(
+                        "Gate opens from notifications",
+                        subtitle = if (a11yOn) "And from recents and other apps" else "Turn on “Gate every way in” first",
+                        checked = settings.gateFromNotifications && a11yOn,
+                        enabled = a11yOn,
+                    ) { v -> vm.updateSettings { it.copy(gateFromNotifications = v) } }
+                    CardDivider()
+                    ToggleRow("Show Gates on home", checked = settings.showGatesTile) { v -> vm.updateSettings { it.copy(showGatesTile = v) } }
+                }
+            }
+
+            // LEND-1
+            item { SectionTitle("Lending") }
+            item {
+                GroupCard {
+                    ToggleRow(
+                        "Lend the phone",
+                        subtitle = "Hides Vault apps, apps you choose and Gates. Ending it needs your fingerprint.",
+                        checked = settings.lending,
+                    ) { on ->
+                        if (on) {
+                            vm.updateSettings { it.copy(lending = true) }
+                            onClose()
+                        } else {
+                            onAuth("End lending") { vm.updateSettings { it.copy(lending = false) } }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { picker = false }) { Text("Close") } },
-        )
+            }
+
+            item { SectionTitle("Help") }
+            item {
+                val update by Updater.state.collectAsStateWithLifecycle()
+                GroupCard {
+                    RowItem("Updates", value = updateLabel(update), chevron = true) { sheet = SettingSheet.UPDATE }
+                    CardDivider()
+                    RowItem("Timer & island diagnostics", chevron = true, onClick = onDiagnostics)
+                }
+            }
+            item {
+                val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() }
+                Text(
+                    "Gates $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 32.dp).navigationBarsPadding(),
+                )
+            }
+        }
+    }
+
+    when (sheet) {
+        SettingSheet.PICKER -> PickerSheet(ungated, onPick = { sheet = null; onEditApp(it) }, onDismiss = { sheet = null })
+        SettingSheet.RESET -> ResetSheet(state, vm) { sheet = null }
+        SettingSheet.STILL -> StillSheet(state, vm) { sheet = null }
+        SettingSheet.TIMER -> TimerSheet(state, vm) { sheet = null }
+        SettingSheet.UPDATE -> UpdateSheet { sheet = null }
+        null -> Unit
     }
     editGroup?.let { g ->
-        GroupDialog(
+        GroupSheet(
             group = g,
             onSave = { name, limit -> vm.editGroup(g.id, name, limit); editGroup = null },
             onDelete = { vm.deleteGroup(g.id); editGroup = null },
@@ -283,7 +302,7 @@ fun GatesScreen(
         )
     }
     if (newGroup) {
-        GroupDialog(
+        GroupSheet(
             group = null,
             onSave = { name, limit -> vm.newGroup(name, limit); newGroup = false },
             onDelete = null,
@@ -292,126 +311,254 @@ fun GatesScreen(
     }
 }
 
-/** Where the timer goes: the Essentials island when paired (PRD priority 1). */
 @Composable
-private fun IslandStatus() {
-    val context = LocalContext.current
-    val attached by GatesIslandService.attached.collectAsStateWithLifecycle()
-    val installed = GatesIslandService.essentialsInstalled(context)
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Dynamic island", style = MaterialTheme.typography.titleSmall)
-            Text(
-                when {
-                    attached -> "Connected to Essentials. Timers show on the island."
-                    !installed -> "Install Essentials to show timers in a dynamic island. Until then Gates uses the status-bar chip or its own pill."
-                    GatesIslandService.paired(context) -> "Paired with Essentials. It connects while the island is on."
-                    else -> "In Essentials, open Island → Island apps and turn on Gates timer. Until then Essentials shows Gates' timer notification as a plain timer."
-                },
-                style = MaterialTheme.typography.bodySmall,
+private fun Note(text: String, action: String, onAction: () -> Unit) {
+    Column(
+        Modifier.padding(top = 24.dp).fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer).padding(start = 20.dp, end = 8.dp, top = 18.dp, bottom = 6.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(end = 12.dp))
+        QuietButton(action, Modifier.align(Alignment.End), color = MaterialTheme.colorScheme.onPrimaryContainer, onClick = onAction)
+    }
+}
+
+@Composable
+private fun SetupRow(title: String, subtitle: String, done: Boolean, onClick: () -> Unit) {
+    RowItem(
+        title = title,
+        subtitle = subtitle,
+        leading = {
+            Box(
+                Modifier.size(24.dp).clip(CircleShape)
+                    .then(if (done) Modifier.background(MaterialTheme.colorScheme.primary) else Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (done) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+            }
+        },
+        value = if (done) "On" else "Allow",
+        chevron = !done,
+        onClick = if (done) null else onClick,
+    )
+}
+
+@Composable
+private fun GatedRow(app: LaunchApp, state: GatesState, usage: Map<String, Int>, onClick: () -> Unit) {
+    val cfg = state.config(app.pkg)
+    val left = Limits.remaining(state, app.pkg, usage)
+    val group = cfg.groupId?.let { id -> state.groups.find { it.id == id } }
+    val details = listOfNotNull(
+        cfg.gate.title,
+        cfg.dailyLimit?.let { "${formatMinutes(it)} a day" },
+        group?.name,
+        left?.let { "${formatMinutes(it)} left" },
+        "Upstairs".takeIf { cfg.manualUpstairs },
+    ).joinToString(" · ")
+    RowItem(
+        app.label,
+        subtitle = details,
+        leading = { AppGlyph(app, 32.dp) },
+        trailing = { GateMark(cfg.gate, MaterialTheme.colorScheme.onSurfaceVariant, 16.dp) },
+        chevron = true,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun WeeklyCard(state: GatesState, apps: List<LaunchApp>, usage: Map<String, Int>) {
+    // Last 6 finished days plus today so far. No scores, no streaks.
+    val days = state.history.takeLast(6) + DaySummary(
+        dayStart = state.ledger.dayStart,
+        minutes = usage.filterKeys { state.apps.containsKey(it) },
+        cancels = state.ledger.cancels,
+        borrowed = state.ledger.borrowed,
+    )
+    fun sum(pick: (DaySummary) -> Map<String, Int>) =
+        days.flatMap { pick(it).entries }.groupBy({ it.key }, { it.value }).mapValues { it.value.sum() }
+    val minutes = sum { it.minutes }
+        .filterKeys { state.config(it).gate != GateType.NONE || state.apps[it]?.dailyLimit != null }
+        .filterValues { it > 0 }
+    val cancels = sum { it.cancels }.values.sum()
+    val borrowed = sum { it.borrowed }.values.sum()
+    val label = { pkg: String -> apps.find { it.pkg == pkg }?.label ?: pkg }
+    val max = (minutes.values.maxOrNull() ?: 1).coerceAtLeast(1)
+
+    GroupCard {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (minutes.isEmpty()) {
+                Text(
+                    "Time in gated apps will show here.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            minutes.entries.sortedByDescending { it.value }.take(6).forEach { (pkg, m) ->
+                Column {
+                    Row {
+                        Text(label(pkg), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(formatMinutes(m), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Meter(m / max.toFloat())
+                }
+            }
+            val notes = listOfNotNull(
+                "Closed at the gate $cancels ${if (cancels == 1) "time" else "times"}".takeIf { cancels > 0 },
+                "Borrowed ${formatMinutes(borrowed)}".takeIf { borrowed > 0 },
             )
-            if (installed && !attached) {
-                TextButton(onClick = { GatesIslandService.openEssentials(context) }) { Text("Open Essentials") }
+            Text(
+                (notes + "Last ${days.size} ${if (days.size == 1) "day" else "days"}").joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// ------------------------------------------------------------------ setting sheets
+
+@Composable
+private fun PickerSheet(apps: List<LaunchApp>, onPick: (LaunchApp) -> Unit, onDismiss: () -> Unit) {
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Add a gate")
+        Text("Which app?", style = MaterialTheme.typography.displaySmall)
+        Spacer(Modifier.height(16.dp))
+        GroupCard {
+            LazyColumn(Modifier.heightIn(max = 460.dp)) {
+                items(apps, key = { it.pkg }) { app ->
+                    RowItem(app.label, leading = { AppGlyph(app, 30.dp) }) { onPick(app) }
+                }
             }
         }
     }
 }
 
 /** RESET-2: 15-minute steps; the change waits for the next reset. */
-private fun setReset(vm: LauncherViewModel, minutes: Int) {
-    val m = ((minutes % 1440) + 1440) % 1440
-    vm.updateSettings { s -> s.copy(pendingResetMinutes = if (m == s.resetMinutes) null else m) }
-}
-
 @Composable
-private fun AppRow(app: LaunchApp, state: GatesState, usage: Map<String, Int>, onClick: () -> Unit) {
-    val cfg = state.config(app.pkg)
-    val left = Limits.remaining(state, app.pkg, usage)
-    val group = cfg.groupId?.let { id -> state.groups.find { it.id == id } }
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AppGlyph(app, 36.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(app.label)
-            val details = listOfNotNull(
-                cfg.dailyLimit?.let { "${formatMinutes(it)} a day" },
-                group?.name,
-                left?.let { "${formatMinutes(it)} left" },
-                "Upstairs".takeIf { cfg.manualUpstairs },
+private fun ResetSheet(state: GatesState, vm: GatesActions, onDismiss: () -> Unit) {
+    val s = state.settings
+    val shown = s.pendingResetMinutes ?: s.resetMinutes
+    fun set(minutes: Int) {
+        val m = ((minutes % 1440) + 1440) % 1440
+        vm.updateSettings { it.copy(pendingResetMinutes = if (m == it.resetMinutes) null else m) }
+    }
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Daily reset")
+        SheetTitle("When does your day start?", "Limits refill then, not at midnight.")
+        Spacer(Modifier.height(28.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            StepButton("−") { set(shown - 15) }
+            Text(
+                Days.formatTime(shown), style = MaterialTheme.typography.displayMedium,
+                textAlign = TextAlign.Center, modifier = Modifier.width(200.dp),
             )
-            if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            StepButton("+") { set(shown + 15) }
         }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            if (s.pendingResetMinutes != null) "Starts after the next reset at ${Days.formatTime(s.resetMinutes)}, so it can't refill today."
+            else "Changes start from the next reset.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(28.dp))
+        PrimaryButton("Done", Modifier.fillMaxWidth(), onClick = onDismiss)
     }
 }
 
 @Composable
-private fun WeeklySummary(state: GatesState, apps: List<LaunchApp>, usage: Map<String, Int>) {
-    // Last 6 finished days plus today so far.
-    val days = state.history.takeLast(6) + dev.pridgey.gates.data.DaySummary(
-        dayStart = state.ledger.dayStart,
-        minutes = usage.filterKeys { state.apps.containsKey(it) },
-        cancels = state.ledger.cancels,
-        borrowed = state.ledger.borrowed,
-    )
-    fun sum(pick: (dev.pridgey.gates.data.DaySummary) -> Map<String, Int>) =
-        days.flatMap { pick(it).entries }.groupBy({ it.key }, { it.value }).mapValues { it.value.sum() }
-    val minutes = sum { it.minutes }.filterKeys { state.config(it).gate != GateType.NONE || state.apps[it]?.dailyLimit != null }
-    val cancels = sum { it.cancels }
-    val borrowed = sum { it.borrowed }
-    val label = { pkg: String -> apps.find { it.pkg == pkg }?.label ?: pkg }
+private fun StepButton(label: String, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
+    Box(
+        Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .pressable { haptics.tick(); onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.displaySmall)
+    }
+}
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (minutes.isEmpty() && cancels.isEmpty()) {
-            Text("Nothing yet. Time in gated apps shows here.", style = MaterialTheme.typography.bodySmall)
-        }
-        minutes.entries.sortedByDescending { it.value }.forEach { (pkg, m) ->
-            Row {
-                Text(label(pkg), Modifier.weight(1f))
-                Text(formatMinutes(m))
+@Composable
+private fun StillSheet(state: GatesState, vm: GatesActions, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val s = state.settings
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Still mode")
+        SheetTitle("A calmer phone", "Warm, quiet colours, a slow breath on gates, and a soft fade when time's up.")
+        Spacer(Modifier.height(20.dp))
+        GroupCard { ToggleRow("Still mode", checked = s.stillMode) { v -> vm.updateSettings { it.copy(stillMode = v) } } }
+        if (s.stillMode) {
+            SectionTitle("When")
+            PillRow {
+                Pill("Always", s.stillFrom == null) { vm.updateSettings { it.copy(stillFrom = null) } }
+                listOf(20 * 60, 21 * 60, 22 * 60).forEach { m ->
+                    Pill("From ${Days.formatTime(m)}", s.stillFrom == m) { vm.updateSettings { it.copy(stillFrom = m) } }
+                }
+            }
+            Text(
+                "Until the day resets at ${Days.formatTime(s.resetMinutes)}.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 10.dp),
+            )
+            if (!SoftExit.canGrayscale(context)) {
+                Text(
+                    "For a true grayscale fade, run once from a computer:\nadb shell pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, top = 16.dp),
+                )
             }
         }
-        val totalCancels = cancels.values.sum()
-        if (totalCancels > 0) {
-            Text(
-                "Closed at the gate $totalCancels time${if (totalCancels == 1) "" else "s"}: " +
-                    cancels.entries.sortedByDescending { it.value }.joinToString { "${label(it.key)} ${it.value}" },
-                style = MaterialTheme.typography.bodySmall,
+        Spacer(Modifier.height(24.dp))
+        PrimaryButton("Done", Modifier.fillMaxWidth(), onClick = onDismiss)
+    }
+}
+
+@Composable
+private fun TimerSheet(state: GatesState, vm: GatesActions, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val attached by GatesIslandService.attached.collectAsStateWithLifecycle()
+    val installed = GatesIslandService.essentialsInstalled(context)
+    val selected = state.settings.timerDisplay
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Timer")
+        SheetTitle("Where the timer shows", "Never over full-screen video or games.")
+        Spacer(Modifier.height(20.dp))
+        GroupCard {
+            TimerDisplay.entries.forEachIndexed { i, d ->
+                if (i > 0) CardDivider()
+                RowItem(
+                    d.title,
+                    subtitle = when (d) {
+                        TimerDisplay.AUTOMATIC -> "Island, then status bar, then Gates' pill"
+                        TimerDisplay.ISLAND -> "Essentials dynamic island"
+                        TimerDisplay.STATUS_CHIP -> "Android 16 Live Update chip"
+                        TimerDisplay.OVERHEAD_PILL -> "A small pill under the status bar"
+                        TimerDisplay.OFF -> "Only the time's-up sheet"
+                    },
+                    trailing = {
+                        if (d == selected) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    },
+                ) { vm.updateSettings { it.copy(timerDisplay = d) } }
+            }
+        }
+        SectionTitle("Dynamic island")
+        GroupCard {
+            RowItem(
+                when {
+                    attached -> "Connected to Essentials"
+                    !installed -> "Essentials isn't installed"
+                    GatesIslandService.paired(context) -> "Paired with Essentials"
+                    else -> "Not paired yet"
+                },
+                subtitle = when {
+                    attached -> "Timers show on the island"
+                    !installed -> "Gates uses the status bar or its own pill"
+                    GatesIslandService.paired(context) -> "Connects while the island is on"
+                    else -> "In Essentials: Island → Island apps → Gates timer"
+                },
+                chevron = installed && !attached,
+                onClick = if (installed && !attached) ({ GatesIslandService.openEssentials(context) }) else null,
             )
         }
-        val totalBorrowed = borrowed.values.sum()
-        if (totalBorrowed > 0) {
-            Text("Borrowed from the next day: ${formatMinutes(totalBorrowed)}", style = MaterialTheme.typography.bodySmall)
-        }
-        Text("Over the last ${days.size} day${if (days.size == 1) "" else "s"}.", style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-@Composable
-private fun Notice(text: String, action: String, onAction: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(text)
-            TextButton(onClick = onAction, modifier = Modifier.align(Alignment.End)) { Text(action) }
-        }
-    }
-}
-
-@Composable
-private fun SwitchRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(checked, onCheckedChange = onChange, enabled = enabled)
+        Spacer(Modifier.height(24.dp))
+        PrimaryButton("Done", Modifier.fillMaxWidth(), onClick = onDismiss)
     }
 }

@@ -16,7 +16,7 @@ import dev.pridgey.gates.data.Limits
 import dev.pridgey.gates.store
 import dev.pridgey.gates.ui.GateSheet
 import dev.pridgey.gates.ui.GatesTheme
-import dev.pridgey.gates.ui.OutOfTimeDialog
+import dev.pridgey.gates.ui.OutOfTimeSheet
 
 /**
  * Shown over an app that was opened from a notification, recents or another app
@@ -42,7 +42,7 @@ class GateActivity : ComponentActivity() {
             GatesTheme(still = state.settings.stillActive()) {
                 BackHandler { cancel() }
                 if (remaining == 0) {
-                    OutOfTimeDialog(
+                    OutOfTimeSheet(
                         app = app,
                         backAt = Gates.backAt(this),
                         onBorrow = { m ->

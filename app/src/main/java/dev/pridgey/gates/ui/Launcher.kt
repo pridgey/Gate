@@ -4,16 +4,19 @@ import android.annotation.SuppressLint
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,55 +26,80 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pridgey.gates.Gates
 import dev.pridgey.gates.data.GateType
 import dev.pridgey.gates.data.LaunchApp
+import dev.pridgey.gates.data.Limits
+import dev.pridgey.gates.data.Session
+import dev.pridgey.gates.data.formatMinutes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private sealed interface Overlay {
     data class Gate(val app: LaunchApp) : Overlay
     data class OutOfTime(val app: LaunchApp) : Overlay
     data class Options(val app: LaunchApp) : Overlay
 }
+
+private val OpenSpring = spring<Float>(dampingRatio = 0.92f, stiffness = 420f)
+private val CloseSpring = spring<Float>(dampingRatio = 1f, stiffness = 600f)
 
 /**
  * The launcher: home, All apps, Upstairs and the Gates app, plus the gate sheets.
@@ -88,29 +116,34 @@ fun LauncherRoot(
     val usage by vm.usage.collectAsStateWithLifecycle()
     val hasUsage by vm.hasUsageAccess.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    var drawer by remember { mutableStateOf(false) }
+    // All apps follows the finger: 0 = home, 1 = All apps.
+    val drawer = remember { Animatable(0f) }
     var upstairs by remember { mutableStateOf(false) }
     var gatesApp by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
     var editHome by remember { mutableStateOf(false) }
-    val lending = state.settings.lending
-    val still = state.settings.stillActive()
     var overlay by remember { mutableStateOf<Overlay?>(null) }
+    val lending = state.settings.lending
+
+    fun openDrawer() = scope.launch { drawer.animateTo(1f, OpenSpring) }
+    fun closeDrawer() = scope.launch { drawer.animateTo(0f, CloseSpring) }
 
     LaunchedEffect(homePresses) {
-        homePresses.collect { drawer = false; upstairs = false; gatesApp = false; diagnostics = false; editHome = false; overlay = null }
+        homePresses.collect {
+            closeDrawer(); upstairs = false; gatesApp = false; diagnostics = false; editHome = false; overlay = null
+        }
     }
 
     val byPkg = remember(apps) { apps.associateBy { it.pkg } }
-    val gatesPkg = context.packageName
     // LEND-1: while lending, Vault apps, chosen apps and Gates itself disappear everywhere.
     val visible: (LaunchApp) -> Boolean = {
-        !(it.isGates && (!state.settings.showGatesTile || lending)) &&
-            !dev.pridgey.gates.data.Limits.hiddenWhileLending(state, it.pkg)
+        !(it.isGates && (!state.settings.showGatesTile || lending)) && !Limits.hiddenWhileLending(state, it.pkg)
     }
-    // usage is read so these recompute when it changes.
-    val upstairsPkgs = remember(state, usage, apps) { apps.filter { visible(it) && vm.isUpstairs(it.pkg) }.map { it.pkg }.toSet() }
+    val upstairsPkgs = remember(state, usage, apps) {
+        apps.filter { visible(it) && vm.isUpstairs(it.pkg) }.map { it.pkg }.toSet()
+    }
 
     // GATE-5: the same gate logic for every place an app can be opened from.
     fun open(app: LaunchApp) {
@@ -124,81 +157,103 @@ fun LauncherRoot(
         }
     }
 
-    val iconFor: @Composable (LaunchApp, Boolean, String?) -> Unit = { app, onWallpaper, tag ->
-        AppIcon(
-            app = app,
-            gate = state.config(app.pkg).gate,
-            remaining = vm.remaining(app.pkg),
-            onClick = { open(app) },
-            onLongClick = { if (!lending) overlay = Overlay.Options(app) },
-            tag = tag,
-            onWallpaper = onWallpaper,
-            still = still,
-        )
+    fun options(app: LaunchApp) {
+        if (!lending) overlay = Overlay.Options(app)
     }
 
-    Home(
-        still = still,
-        lending = lending,
-        onEndLending = { onVault("End lending") { vm.updateSettings { it.copy(lending = false) } } },
-        homeApps = state.home.mapNotNull { byPkg[it] }.filter { visible(it) && it.pkg !in upstairsPkgs },
-        dockApps = state.dock.mapNotNull { byPkg[it] }.filter { visible(it) && it.pkg !in upstairsPkgs },
-        upstairsCount = upstairsPkgs.size,
-        icon = { iconFor(it, true, null) },
-        editing = editHome,
-        onMove = { pkg, to -> vm.moveOnHome(pkg, to) },
-        onDoneEditing = { editHome = false },
-        onUpstairs = { upstairs = true },
-        onSwipeUp = { drawer = true },
-        onSwipeDown = { expandNotifications(context) },
-    )
+    val anyPanel = upstairs || gatesApp || diagnostics
+    val homeFade by androidx.compose.animation.core.animateFloatAsState(if (anyPanel) 0f else 1f, tween(220), label = "homeFade")
 
-    AnimatedVisibility(drawer, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
-        BackHandler { drawer = false }
-        AllApps(
-            apps = apps.filter(visible),
-            tagFor = { pkg ->
-                when {
-                    pkg !in upstairsPkgs -> null
-                    vm.remaining(pkg) == 0 -> "OUT OF TIME"
-                    else -> "UPSTAIRS"
-                }
+    Box(Modifier.fillMaxSize()) {
+        // Home recedes as All apps comes up.
+        val p = drawer.value
+        Home(
+            modifier = Modifier.graphicsLayer {
+                alpha = (1f - p * 1.4f).coerceIn(0f, 1f) * homeFade
+                val s = 1f - 0.05f * p
+                scaleX = s; scaleY = s
             },
-            icon = { app, tag -> iconFor(app, false, tag) },
-            onSettings = if (lending) null else ({ drawer = false; gatesApp = true }),
-            onClose = { drawer = false },
+            lending = lending,
+            onEndLending = { onVault("End lending") { vm.updateSettings { it.copy(lending = false) } } },
+            session = state.session,
+            onSessionTap = { state.session?.pkg?.let(byPkg::get)?.let(vm::launch) },
+            upstairsCount = upstairsPkgs.size,
+            onUpstairs = { upstairs = true },
+            homeApps = state.home.mapNotNull { byPkg[it] }.filter { visible(it) && it.pkg !in upstairsPkgs },
+            dockApps = state.dock.mapNotNull { byPkg[it] }.filter { visible(it) && it.pkg !in upstairsPkgs },
+            gateOf = { state.config(it).gate },
+            remainingOf = { vm.remaining(it) },
+            onOpen = ::open,
+            onOptions = ::options,
+            editing = editHome,
+            onMove = vm::moveOnHome,
+            onDoneEditing = { editHome = false },
+            drawerProgress = { drawer.value },
+            onDrawerDrag = { scope.launch { drawer.snapTo(it.coerceIn(0f, 1f)) } },
+            onDrawerRelease = { velocity ->
+                if (velocity < -600f || drawer.value > 0.3f) openDrawer() else closeDrawer()
+            },
+            onSwipeDown = { expandNotifications(context) },
         )
-    }
 
-    AnimatedVisibility(upstairs, enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut()) {
-        BackHandler { upstairs = false }
-        Upstairs(
-            outOfTime = upstairsPkgs.filter { vm.remaining(it) == 0 && !state.config(it).manualUpstairs }.mapNotNull { byPkg[it] },
-            chosen = upstairsPkgs.filter { state.config(it).manualUpstairs }.mapNotNull { byPkg[it] },
-            backAt = Gates.backAt(context),
-            icon = { iconFor(it, false, null) },
-            onClose = { upstairs = false },
-        )
-    }
+        if (p > 0.001f) {
+            BackHandler { closeDrawer() }
+            AllApps(
+                progress = { drawer.value },
+                apps = apps.filter(visible),
+                gateOf = { state.config(it).gate },
+                remainingOf = { vm.remaining(it) },
+                tagFor = { pkg ->
+                    when {
+                        pkg !in upstairsPkgs -> null
+                        vm.remaining(pkg) == 0 -> "Out of time"
+                        else -> "Upstairs"
+                    }
+                },
+                onOpen = { app ->
+                    open(app)
+                    val gate = state.config(app.pkg).gate
+                    if ((gate == GateType.NONE || gate == GateType.VAULT) && !app.isGates && vm.remaining(app.pkg) != 0) closeDrawer()
+                },
+                onOptions = ::options,
+                onSettings = if (lending) null else ({ closeDrawer(); gatesApp = true }),
+                onDrag = { scope.launch { drawer.snapTo(it.coerceIn(0f, 1f)) } },
+                onRelease = { velocity -> if (velocity > 600f || drawer.value < 0.7f) closeDrawer() else openDrawer() },
+            )
+        }
 
-    AnimatedVisibility(gatesApp, enter = fadeIn(), exit = fadeOut()) {
-        BackHandler { gatesApp = false }
-        GatesScreen(
-            vm = vm,
-            state = state,
-            apps = apps,
-            usage = usage,
-            hasUsageAccess = hasUsage,
-            onEditApp = { overlay = Overlay.Options(it) },
-            onDiagnostics = { diagnostics = true },
-            onAuth = onVault,
-            onClose = { gatesApp = false },
-        )
-    }
+        Panel(upstairs) {
+            BackHandler { upstairs = false }
+            Upstairs(
+                outOfTime = upstairsPkgs.filter { vm.remaining(it) == 0 && !state.config(it).manualUpstairs }.mapNotNull { byPkg[it] },
+                chosen = upstairsPkgs.filter { state.config(it).manualUpstairs }.mapNotNull { byPkg[it] },
+                backAt = Gates.backAt(context),
+                gateOf = { state.config(it).gate },
+                onOpen = ::open,
+                onOptions = ::options,
+                onClose = { upstairs = false },
+            )
+        }
 
-    AnimatedVisibility(diagnostics, enter = fadeIn(), exit = fadeOut()) {
-        BackHandler { diagnostics = false }
-        DiagnosticsScreen(onClose = { diagnostics = false })
+        Panel(gatesApp) {
+            BackHandler { gatesApp = false }
+            GatesScreen(
+                vm = vm,
+                state = state,
+                apps = apps,
+                usage = usage,
+                hasUsageAccess = hasUsage,
+                onEditApp = { overlay = Overlay.Options(it) },
+                onDiagnostics = { diagnostics = true },
+                onAuth = onVault,
+                onClose = { gatesApp = false },
+            )
+        }
+
+        Panel(diagnostics) {
+            BackHandler { diagnostics = false }
+            DiagnosticsScreen(onClose = { diagnostics = false })
+        }
     }
 
     when (val o = overlay) {
@@ -211,12 +266,15 @@ fun LauncherRoot(
             } else null,
             onPick = { minutes, reason ->
                 overlay = null
-                if (o.app.isGates) gatesApp = true else vm.startSession(o.app, minutes, reason)
+                if (o.app.isGates) gatesApp = true else {
+                    vm.startSession(o.app, minutes, reason)
+                    closeDrawer()
+                }
             },
             onSaveReason = { vm.saveReason(o.app.pkg, it) },
             onCancel = { vm.countCancel(o.app.pkg); overlay = null },
         )
-        is Overlay.OutOfTime -> OutOfTimeDialog(
+        is Overlay.OutOfTime -> OutOfTimeSheet(
             app = o.app,
             backAt = Gates.backAt(context),
             onBorrow = { minutes -> vm.borrow(o.app.pkg, minutes); overlay = null },
@@ -228,11 +286,11 @@ fun LauncherRoot(
             groups = state.groups,
             onHome = o.app.pkg in state.home,
             onDock = o.app.pkg in state.dock,
-            onToggleDock = { vm.toggleDock(o.app.pkg) },
-            onRearrange = { overlay = null; drawer = false; gatesApp = false; editHome = true },
             remaining = vm.remaining(o.app.pkg),
             onChange = { vm.updateApp(o.app.pkg, it) },
             onToggleHome = { vm.toggleHome(o.app.pkg) },
+            onToggleDock = { vm.toggleDock(o.app.pkg) },
+            onRearrange = { overlay = null; closeDrawer(); gatesApp = false; upstairs = false; editHome = true },
             onNewGroup = vm::newGroup,
             onAppInfo = { Gates.appInfo(context, o.app.pkg) },
             onDismiss = { overlay = null },
@@ -242,266 +300,458 @@ fun LauncherRoot(
 
     if (!state.settings.onboarded) {
         Onboarding(
-            onDone = { resetMinutes, still ->
-                vm.updateSettings { it.copy(resetMinutes = resetMinutes, stillMode = still, onboarded = true) }
+            onDone = { resetMinutes, stillOn ->
+                vm.updateSettings { it.copy(resetMinutes = resetMinutes, stillMode = stillOn, onboarded = true) }
             },
         )
     }
 }
 
-/** HOME-1: clock, Upstairs bar, icon grid and dock. Swipe up for All apps, down for notifications. */
+/** Full-screen panels (Upstairs, Gates, Diagnostics) rise in gently. */
 @Composable
-private fun Home(
-    still: Boolean,
+private fun Panel(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible,
+        enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = 380f)) { it / 8 } + fadeIn(tween(200)),
+        exit = slideOutVertically(tween(180)) { it / 12 } + fadeOut(tween(160)),
+    ) { content() }
+}
+
+// ------------------------------------------------------------------ home
+
+/** HOME-1, calm: clock, a short text list of apps, a quiet bottom row. */
+@Composable
+internal fun Home(
+    modifier: Modifier,
     lending: Boolean,
     onEndLending: () -> Unit,
+    session: Session?,
+    onSessionTap: () -> Unit,
+    upstairsCount: Int,
+    onUpstairs: () -> Unit,
     homeApps: List<LaunchApp>,
     dockApps: List<LaunchApp>,
-    upstairsCount: Int,
-    icon: @Composable (LaunchApp) -> Unit,
+    gateOf: (String) -> GateType,
+    remainingOf: (String) -> Int?,
+    onOpen: (LaunchApp) -> Unit,
+    onOptions: (LaunchApp) -> Unit,
     editing: Boolean,
-    onMove: (pkg: String, toIndex: Int) -> Unit,
+    onMove: (String, Int) -> Unit,
     onDoneEditing: () -> Unit,
-    onUpstairs: () -> Unit,
-    onSwipeUp: () -> Unit,
+    drawerProgress: () -> Float,
+    onDrawerDrag: (Float) -> Unit,
+    onDrawerRelease: (velocity: Float) -> Unit,
     onSwipeDown: () -> Unit,
 ) {
-    var drag by remember { mutableStateOf(0f) }
-    Column(
-        Modifier
+    val ink = LocalInk.current
+    var heightPx by remember { mutableFloatStateOf(1f) }
+    Box(
+        modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .onSizeChanged { heightPx = it.height.toFloat().coerceAtLeast(1f) }
+            .background(Brush.verticalGradient(0f to ink.scrim.copy(alpha = 0.35f), 0.3f to Color.Transparent, 0.7f to Color.Transparent, 1f to ink.scrim.copy(alpha = 0.45f)))
+            .pointerInput(editing) {
+                if (editing) return@pointerInput
+                val tracker = VelocityTracker()
+                var pulledDown = 0f
                 detectVerticalDragGestures(
-                    onDragStart = { drag = 0f },
+                    onDragStart = { tracker.resetTracking(); pulledDown = 0f },
                     onDragEnd = {
-                        if (drag < -120f) onSwipeUp() else if (drag > 120f) onSwipeDown()
+                        val v = tracker.calculateVelocity().y
+                        if (drawerProgress() > 0f) onDrawerRelease(v)
+                        else if (pulledDown > 60.dp.toPx() || v > 1200f) onSwipeDown()
                     },
-                    onVerticalDrag = { _, dy -> drag += dy },
+                    onDragCancel = { onDrawerRelease(0f) },
+                    onVerticalDrag = { change, dy ->
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        if (dy < 0 || drawerProgress() > 0f) onDrawerDrag(drawerProgress() - dy / (heightPx * 0.45f))
+                        else pulledDown += dy
+                    },
                 )
             }
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 28.dp),
     ) {
-        if (lending) {
-            Surface(
-                onClick = onEndLending,
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.5f),
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
-            ) {
+        Column(Modifier.fillMaxSize()) {
+            Spacer(Modifier.height(40.dp))
+            ClockBlock(session, onSessionTap, upstairsCount, onUpstairs)
+            if (lending) {
+                Spacer(Modifier.height(16.dp))
                 Text(
-                    "Lending · tap to end", color = Color.White, fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    "Lending · tap to end", style = MaterialTheme.typography.labelMedium, color = ink.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(ink.primary.copy(alpha = 0.14f))
+                        .pressable(onClick = onEndLending).padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
-        }
-        if (upstairsCount > 0) {
-            // UP-1
-            Surface(
-                onClick = onUpstairs,
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.35f),
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
-            ) {
-                Text(
-                    "Upstairs · $upstairsCount",
-                    color = Color.White, fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-            }
-        }
-        Clock(still = still)
-        Spacer(Modifier.height(24.dp))
-        if (editing) {
-            EditableGrid(homeApps, onMove, onDoneEditing)
-        } else {
-            homeApps.chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    row.forEach { icon(it) }
-                    repeat(4 - row.size) { Spacer(Modifier.padding(38.dp)) }
-                }
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        if (dockApps.isNotEmpty()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
-                    .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                dockApps.forEach { icon(it) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Clock(still: Boolean) {
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = LocalDateTime.now()
-            delay(1_000)
-        }
-    }
-    val alpha = if (still) 0.75f else 1f
-    Column(Modifier.fillMaxWidth().padding(top = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            now.format(DateTimeFormatter.ofPattern("h:mm")),
-            color = Color.White.copy(alpha = alpha),
-            fontSize = 64.sp,
-            fontWeight = if (still) FontWeight.Light else FontWeight.Normal,
-        )
-        Text(now.format(DateTimeFormatter.ofPattern("EEEE, MMMM d")), color = Color.White.copy(alpha = alpha))
-    }
-}
-
-/** All apps with search (HOME-1, UP-2). */
-@Composable
-private fun AllApps(
-    apps: List<LaunchApp>,
-    tagFor: (String) -> String?,
-    icon: @Composable (LaunchApp, String?) -> Unit,
-    onSettings: (() -> Unit)?,
-    onClose: () -> Unit,
-) {
-    var query by remember { mutableStateOf("") }
-    val focus = remember { FocusRequester() }
-    val shown = apps.filter { query.isBlank() || it.label.contains(query.trim(), ignoreCase = true) }
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.statusBarsPadding().navigationBarsPadding().imePadding()) {
-            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    leadingIcon = { Icon(Icons.Filled.Search, null) },
-                    placeholder = { Text("Search apps") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.weight(1f).focusRequester(focus),
-                )
-                if (onSettings != null) IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Gates settings") }
-                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
-            }
-            LazyVerticalGrid(GridCells.Adaptive(80.dp), Modifier.fillMaxSize()) {
-                if (shown.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text("No apps match “$query”", Modifier.padding(24.dp))
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                val rowPx = with(LocalDensity.current) { 52.dp.toPx() }
+                val fits = (constraints.maxHeight / rowPx).toInt().coerceAtLeast(1)
+                if (editing) {
+                    EditableList(homeApps.take(fits), onMove, onDoneEditing)
+                } else {
+                    Column {
+                        homeApps.take(fits).forEach { app ->
+                            HomeRow(app, gateOf(app.pkg), remainingOf(app.pkg), { onOpen(app) }, { onOptions(app) })
+                        }
                     }
                 }
-                items(shown, key = { it.pkg }) { app ->
-                    Box(contentAlignment = Alignment.Center) { icon(app, tagFor(app.pkg)) }
+            }
+            if (dockApps.isNotEmpty() && !editing) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    dockApps.forEach { app ->
+                        Text(
+                            app.label, style = MaterialTheme.typography.titleMedium, color = ink.secondary, maxLines = 1,
+                            modifier = Modifier.pressable(onLongClick = { onOptions(app) }) { onOpen(app) }.padding(vertical = 10.dp),
+                        )
+                    }
                 }
             }
-        }
-    }
-}
-
-/** Upstairs: out-of-time apps (until reset) and apps the user put there. */
-@Composable
-private fun Upstairs(
-    outOfTime: List<LaunchApp>,
-    chosen: List<LaunchApp>,
-    backAt: String,
-    icon: @Composable (LaunchApp) -> Unit,
-    onClose: () -> Unit,
-) {
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Upstairs", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
-            }
-            if (outOfTime.isNotEmpty()) {
-                SectionLabel("Out of time · $backAt")
-                IconRows(outOfTime, icon)
-            }
-            if (chosen.isNotEmpty()) {
-                SectionLabel("Put here by you")
-                IconRows(chosen, icon)
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                "Tap here or press back to go down",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.align(Alignment.CenterHorizontally).clickable(onClick = onClose).padding(12.dp),
+            // A quiet handle: swipe up for everything else.
+            Box(
+                Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp, bottom = 10.dp)
+                    .size(28.dp, 3.dp).clip(RoundedCornerShape(50)).background(ink.faint),
             )
         }
     }
 }
 
 @Composable
-private fun IconRows(apps: List<LaunchApp>, icon: @Composable (LaunchApp) -> Unit) {
-    apps.chunked(4).forEach { row ->
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) { row.forEach { icon(it) } }
+private fun ClockBlock(session: Session?, onSessionTap: () -> Unit, upstairsCount: Int, onUpstairs: () -> Unit) {
+    val ink = LocalInk.current
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    var millis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalDateTime.now()
+            millis = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    Text(now.format(DateTimeFormatter.ofPattern("h:mm")), style = MaterialTheme.typography.displayLarge, color = ink.primary)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(now.format(DateTimeFormatter.ofPattern("EEE d MMM")), style = MaterialTheme.typography.bodyLarge, color = ink.secondary)
+        if (upstairsCount > 0) {
+            // UP-1: Upstairs lives in the date line.
+            Text(
+                "  ·  $upstairsCount upstairs", style = MaterialTheme.typography.bodyLarge, color = ink.primary,
+                modifier = Modifier.pressable(onClick = onUpstairs).padding(vertical = 6.dp),
+            )
+        }
+    }
+    if (session != null) {
+        val left = session.endsAt - millis
+        Row(
+            Modifier.padding(top = 4.dp).pressable(onClick = onSessionTap).padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GateMark(GateType.PAUSE, ink.secondary, 14.dp)
+            Spacer(Modifier.width(8.dp))
+            val s = (left / 1000).coerceAtLeast(0)
+            Text(
+                if (left > 0) "${session.label} · %d:%02d left".format(s / 60, s % 60) else "${session.label} · time's up",
+                style = MaterialTheme.typography.bodyLarge, color = ink.secondary,
+            )
+        }
     }
 }
 
-/**
- * Rearranging home: drag an icon onto another slot. Tap Done when finished.
- * Long-press stays free for the app's options, so this is its own mode.
- */
+/** One app on home: its name, then a quiet gate mark and time left. */
 @Composable
-private fun EditableGrid(
-    apps: List<LaunchApp>,
-    onMove: (pkg: String, toIndex: Int) -> Unit,
-    onDone: () -> Unit,
-) {
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    var cellW by remember { mutableStateOf(1f) }
-    val cellH = with(density) { 104.dp.toPx() }
-    Column(
-        Modifier.fillMaxWidth().onSizeChanged { cellW = it.width / 4f },
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun HomeRow(app: LaunchApp, gate: GateType, remaining: Int?, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val ink = LocalInk.current
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).pressable(onLongClick = onLongClick, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        apps.chunked(4).forEachIndexed { r, row ->
-            Row(Modifier.fillMaxWidth()) {
-                row.forEachIndexed { c, app ->
-                    val index = r * 4 + c
-                    var offset by remember(app.pkg, index) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(104.dp)
-                            .zIndex(if (offset != androidx.compose.ui.geometry.Offset.Zero) 1f else 0f)
-                            .graphicsLayer { translationX = offset.x; translationY = offset.y; alpha = 0.9f }
-                            .pointerInput(app.pkg, index) {
-                                detectDragGestures(
-                                    onDragEnd = {
-                                        val dc = kotlin.math.round(offset.x / cellW).toInt()
-                                        val dr = kotlin.math.round(offset.y / cellH).toInt()
-                                        val col = (c + dc).coerceIn(0, 3)
-                                        val target = ((r + dr) * 4 + col).coerceIn(0, apps.lastIndex)
-                                        offset = androidx.compose.ui.geometry.Offset.Zero
-                                        if (target != index) onMove(app.pkg, target)
-                                    },
-                                    onDragCancel = { offset = androidx.compose.ui.geometry.Offset.Zero },
-                                    onDrag = { change, amount -> change.consume(); offset += amount },
-                                )
+        Text(
+            app.label, style = MaterialTheme.typography.headlineMedium, color = ink.primary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+        )
+        Marks(gate, remaining, ink.secondary, Modifier.padding(start = 12.dp))
+    }
+}
+
+@Composable
+private fun Marks(gate: GateType, remaining: Int?, color: Color, modifier: Modifier = Modifier) {
+    if (gate == GateType.NONE && remaining == null) return
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (gate != GateType.NONE) GateMark(gate, color, 14.dp)
+        if (remaining != null) {
+            if (gate != GateType.NONE) Spacer(Modifier.width(6.dp))
+            Text(formatMinutes(remaining), style = MaterialTheme.typography.labelMedium, color = color)
+        }
+    }
+}
+
+/** Rearranging home: drag a name up or down, then Done. */
+@Composable
+private fun EditableList(apps: List<LaunchApp>, onMove: (String, Int) -> Unit, onDone: () -> Unit) {
+    val ink = LocalInk.current
+    val rowPx = with(LocalDensity.current) { 52.dp.toPx() }
+    Column {
+        apps.forEachIndexed { index, app ->
+            var dy by remember(app.pkg, index) { mutableFloatStateOf(0f) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .zIndex(if (dy != 0f) 1f else 0f)
+                    .graphicsLayer { translationY = dy; if (dy != 0f) { scaleX = 1.03f; scaleY = 1.03f } }
+                    .pointerInput(app.pkg, index) {
+                        detectDragGestures(
+                            onDragEnd = {
+                                val target = (index + (dy / rowPx).roundToInt()).coerceIn(0, apps.lastIndex)
+                                dy = 0f
+                                if (target != index) onMove(app.pkg, target)
                             },
+                            onDragCancel = { dy = 0f },
+                            onDrag = { change, amount -> change.consume(); dy += amount.y },
+                        )
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(app.label, style = MaterialTheme.typography.headlineMedium, color = ink.primary, modifier = Modifier.weight(1f), maxLines = 1)
+                Text("⋮⋮", style = MaterialTheme.typography.titleMedium, color = ink.faint)
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Done", style = MaterialTheme.typography.labelLarge, color = ink.scrim,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(ink.primary).pressable(onClick = onDone)
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+        )
+    }
+}
+
+// ------------------------------------------------------------------ all apps
+
+/** All apps (HOME-1, UP-2): a quiet list over the dimmed wallpaper, search at the thumb. */
+@Composable
+internal fun AllApps(
+    progress: () -> Float,
+    apps: List<LaunchApp>,
+    gateOf: (String) -> GateType,
+    remainingOf: (String) -> Int?,
+    tagFor: (String) -> String?,
+    onOpen: (LaunchApp) -> Unit,
+    onOptions: (LaunchApp) -> Unit,
+    onSettings: (() -> Unit)?,
+    onDrag: (Float) -> Unit,
+    onRelease: (velocity: Float) -> Unit,
+) {
+    val ink = LocalInk.current
+    var query by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val list = rememberLazyListState()
+    var heightPx by remember { mutableFloatStateOf(1f) }
+    val shown = remember(apps, query) {
+        val q = query.trim()
+        if (q.isEmpty()) apps
+        else apps.filter { it.label.contains(q, ignoreCase = true) }
+            .sortedBy { if (it.label.startsWith(q, ignoreCase = true)) 0 else 1 }
+    }
+
+    // Open the keyboard once fully up; drop it as soon as the list starts to close.
+    LaunchedEffect(Unit) {
+        snapshotFlow { progress() }.collect { p ->
+            if (p >= 0.999f) runCatching { focus.requestFocus() }
+            if (p < 0.95f) { keyboard?.hide(); focusManager.clearFocus() }
+            if (p <= 0.001f) query = ""
+        }
+    }
+
+    // Pulling down at the top of the list closes All apps.
+    val connection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f) {
+                    onDrag(progress() - available.y / (heightPx * 0.45f))
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && progress() < 1f && available.y < 0f) {
+                    onDrag(progress() - available.y / (heightPx * 0.45f))
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (progress() < 1f) {
+                    onRelease(available.y)
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged { heightPx = it.height.toFloat().coerceAtLeast(1f) }
+            .graphicsLayer {
+                val p = progress()
+                alpha = (p * 1.3f).coerceIn(0f, 1f)
+                translationY = (1f - p) * heightPx * 0.18f
+            }
+            .background(ink.scrim.copy(alpha = 0.86f)),
+    ) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+            LazyColumn(
+                state = list,
+                modifier = Modifier.weight(1f).fillMaxWidth().nestedScroll(connection),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 28.dp, end = 28.dp, top = 32.dp, bottom = 16.dp),
+            ) {
+                if (shown.isEmpty()) {
+                    item { Text("Nothing called “$query”", style = MaterialTheme.typography.titleLarge, color = ink.secondary) }
+                }
+                var lastLetter: Char? = null
+                shown.forEach { app ->
+                    val letter = app.label.firstOrNull()?.uppercaseChar()?.takeIf { it.isLetter() } ?: '#'
+                    if (query.isBlank() && letter != lastLetter) {
+                        lastLetter = letter
+                        item(key = "h-$letter") {
+                            Text(
+                                letter.toString(), style = MaterialTheme.typography.labelSmall, color = ink.faint,
+                                modifier = Modifier.padding(top = 18.dp, bottom = 4.dp),
+                            )
+                        }
+                    }
+                    item(key = app.pkg) {
+                        DrawerRow(app, gateOf(app.pkg), remainingOf(app.pkg), tagFor(app.pkg), { onOpen(app) }, { onOptions(app) })
+                    }
+                }
+            }
+            // Search sits where the thumb is.
+            Row(
+                Modifier.padding(horizontal = 20.dp, vertical = 12.dp).fillMaxWidth().height(52.dp)
+                    .clip(RoundedCornerShape(50)).background(ink.primary.copy(alpha = 0.10f)).padding(start = 18.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Search, null, tint = ink.secondary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) Text("Search", style = MaterialTheme.typography.bodyLarge, color = ink.faint)
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = ink.primary),
+                        cursorBrush = SolidColor(ink.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { shown.firstOrNull()?.let(onOpen) }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    )
+                }
+                if (onSettings != null) {
+                    Box(
+                        Modifier.size(40.dp).clip(RoundedCornerShape(50)).pressable(onClick = onSettings),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Plain icons: nothing opens while rearranging.
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            AppGlyph(app)
-                            Text(app.label, color = Color.White, fontSize = 12.sp, maxLines = 1)
+                        Icon(Icons.Outlined.Settings, "Gates settings", tint = ink.secondary, modifier = Modifier.size(20.dp))
+                        val update by dev.pridgey.gates.update.Updater.state.collectAsStateWithLifecycle()
+                        if (update is dev.pridgey.gates.update.Updater.State.Available) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).padding(top = 9.dp, end = 9.dp).size(7.dp)
+                                    .clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary),
+                            )
                         }
                     }
                 }
-                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        Surface(
-            onClick = onDone,
-            shape = RoundedCornerShape(50),
-            color = Color.Black.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 12.dp),
-        ) {
-            Text("Drag to rearrange · Done", color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+    }
+}
+
+@Composable
+private fun DrawerRow(
+    app: LaunchApp,
+    gate: GateType,
+    remaining: Int?,
+    tag: String?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val ink = LocalInk.current
+    Row(
+        Modifier.fillMaxWidth().height(50.dp).pressable(onLongClick = onLongClick, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                app.label, style = MaterialTheme.typography.titleLarge,
+                color = if (tag != null) ink.secondary else ink.primary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+            Marks(gate, remaining, ink.secondary, Modifier.padding(start = 10.dp))
+        }
+        if (tag != null) Text(tag.uppercase(), style = MaterialTheme.typography.labelSmall, color = ink.faint)
+    }
+}
+
+// ------------------------------------------------------------------ upstairs
+
+/** Upstairs: apps resting until the reset, and apps the user put there. */
+@Composable
+internal fun Upstairs(
+    outOfTime: List<LaunchApp>,
+    chosen: List<LaunchApp>,
+    backAt: String,
+    gateOf: (String) -> GateType,
+    onOpen: (LaunchApp) -> Unit,
+    onOptions: (LaunchApp) -> Unit,
+    onClose: () -> Unit,
+) {
+    val ink = LocalInk.current
+    var pulled by remember { mutableFloatStateOf(0f) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(ink.scrim.copy(alpha = 0.9f))
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = { if (abs(pulled) > 80.dp.toPx()) onClose(); pulled = 0f },
+                    onVerticalDrag = { _, dy -> pulled += dy },
+                )
+            }
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 28.dp),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Spacer(Modifier.height(40.dp))
+            Text("Upstairs", style = MaterialTheme.typography.displayMedium, color = ink.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Resting until the day resets, or put here by you.",
+                style = MaterialTheme.typography.bodyLarge, color = ink.secondary,
+            )
+            if (outOfTime.isNotEmpty()) {
+                Text(
+                    "OUT OF TIME · ${backAt.uppercase()}", style = MaterialTheme.typography.labelSmall, color = ink.faint,
+                    modifier = Modifier.padding(top = 36.dp, bottom = 6.dp),
+                )
+                outOfTime.forEach { DrawerRow(it, gateOf(it.pkg), null, null, { onOpen(it) }, { onOptions(it) }) }
+            }
+            if (chosen.isNotEmpty()) {
+                Text(
+                    "PUT HERE BY YOU", style = MaterialTheme.typography.labelSmall, color = ink.faint,
+                    modifier = Modifier.padding(top = 36.dp, bottom = 6.dp),
+                )
+                chosen.forEach { DrawerRow(it, gateOf(it.pkg), null, null, { onOpen(it) }, { onOptions(it) }) }
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Done", style = MaterialTheme.typography.labelLarge, color = ink.secondary,
+                modifier = Modifier.align(Alignment.CenterHorizontally).pressable(onClick = onClose).padding(16.dp),
+            )
         }
     }
 }

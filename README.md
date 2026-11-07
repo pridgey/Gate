@@ -8,7 +8,10 @@ An Android launcher that puts friction only where you ask for it. See
 ## Get the APK
 
 Every push to `main` publishes a GitHub Release (`v0.1.<run number>`) with the APK
-attached; see the repo's Releases page. Pushes to other branches build the APK as a run
+attached; see the Releases page. Gates updates itself from these releases (Gates → Help →
+Updates, plus a quiet check every 6 hours).
+
+Pushes to other branches build the APK as a run
 artifact only (Actions tab → run → Artifacts).
 
 Build locally (needs JDK 17 and the Android SDK):
@@ -50,12 +53,24 @@ at time's up, long-press ends the session, and the expanded view has End now and
 
 Without pairing, Essentials still shows Gates' timer notification as a plain timer.
 
-All builds are signed with `keystore/debug.keystore` (a debug key, not a secret) so CI APKs
-install over each other and the Essentials pairing survives updates.
+Release builds are signed with a key kept out of the repo: CI reads it from the
+`SIGNING_*` Actions secrets, and local builds use `~/.android/gates-signing/` if present.
+Keep a backup of that folder; without it, installed copies can't be updated.
 
 Gates → Diagnostics → **Timer & island diagnostics** logs pairing, connects, publishes and
 taps (`[island]` lines), and can test other timer styles. Share the report or
 `adb logcat -s GatesDiag`.
+
+## Design
+
+Calm and minimal: Manrope (OFL, `licenses/`), a near-neutral palette with one sage accent,
+text-first home. The shared components live in `app/src/main/java/dev/pridgey/gates/ui/Kit.kt`.
+
+Screenshots of the main screens are rendered on the JVM with Paparazzi:
+
+```sh
+./gradlew recordPaparazziDebug -Pscreens   # writes app/src/test/snapshots/images/
+```
 
 ## Notes
 

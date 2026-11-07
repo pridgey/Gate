@@ -4,30 +4,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import dev.pridgey.gates.Gates
 import dev.pridgey.gates.data.Limits
 import dev.pridgey.gates.store
+import dev.pridgey.gates.ui.Eyebrow
+import dev.pridgey.gates.ui.GSheet
 import dev.pridgey.gates.ui.GatesTheme
-import dev.pridgey.gates.ui.TimeChips
+import dev.pridgey.gates.ui.PrimaryButton
+import dev.pridgey.gates.ui.ReasonQuote
+import dev.pridgey.gates.ui.SheetTitle
+import dev.pridgey.gates.ui.TimeChoices
 
 /** TIME-2: at zero, Close (default) or More time drawn from what's left today. */
 class TimesUpActivity : ComponentActivity() {
@@ -43,16 +37,29 @@ class TimesUpActivity : ComponentActivity() {
         setContent {
             GatesTheme(still = store.state.value.settings.stillActive()) {
                 BackHandler { close() }
-                TimesUp(
-                    label = session.label,
-                    reason = session.reason,
-                    more = more,
-                    onClose = ::close,
-                    onMore = { minutes ->
-                        Gates.extendSession(this, minutes)
-                        finish()
-                    },
-                )
+                GSheet(onDismiss = ::close) {
+                    Eyebrow("Time's up")
+                    SheetTitle(session.label)
+                    session.reason?.let { ReasonQuote(it) }
+                    Spacer(Modifier.height(28.dp))
+                    PrimaryButton("Close", Modifier.fillMaxWidth(), onClick = ::close)
+                    Spacer(Modifier.height(20.dp))
+                    if (more.isNotEmpty()) {
+                        Text(
+                            "Or a little more", style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                        TimeChoices(more) { minutes ->
+                            Gates.extendSession(this@TimesUpActivity, minutes)
+                            finish()
+                        }
+                    } else {
+                        Text(
+                            "That's all for today. ${Gates.backAt(this@TimesUpActivity)}.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
@@ -61,41 +68,5 @@ class TimesUpActivity : ComponentActivity() {
         Gates.endSession(this)
         Gates.goHome(this)
         finish()
-    }
-}
-
-@Composable
-private fun TimesUp(
-    label: String,
-    reason: String?,
-    more: List<Pair<Int, Boolean>>,
-    onClose: () -> Unit,
-    onMore: (Int) -> Unit,
-) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        Surface(
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(24.dp).navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Time's up", style = MaterialTheme.typography.headlineSmall)
-                Text(label, style = MaterialTheme.typography.titleMedium)
-                if (reason != null) {
-                    Text("You came to: “$reason”", fontStyle = FontStyle.Italic)
-                }
-                Spacer(Modifier.height(4.dp))
-                Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Close") }
-                if (more.isNotEmpty()) {
-                    Text("More time", style = MaterialTheme.typography.labelLarge)
-                    TimeChips(more, onPick = onMore)
-                } else {
-                    Text("No time left today.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
     }
 }

@@ -101,6 +101,7 @@ class Store(context: Context) {
             put("home", JSONArray(s.home))
             put("dock", JSONArray(s.dock))
             put("homeInitialized", s.homeInitialized)
+            put("layoutVersion", s.layoutVersion)
             s.session?.let {
                 put("session", JSONObject()
                     .put("pkg", it.pkg).put("label", it.label)
@@ -172,6 +173,7 @@ class Store(context: Context) {
                 home = o.optJSONArray("home").toStringList(),
                 dock = o.optJSONArray("dock").toStringList(),
                 homeInitialized = o.optBoolean("homeInitialized"),
+                layoutVersion = o.optInt("layoutVersion"),
                 session = session,
                 history = o.optJSONArray("history")?.let { arr ->
                     (0 until arr.length()).map {

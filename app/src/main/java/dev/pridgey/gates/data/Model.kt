@@ -107,6 +107,8 @@ data class GatesState(
     val homeInitialized: Boolean = false,
     val session: Session? = null,
     val history: List<DaySummary> = emptyList(),
+    /** Bumped when the home layout changes shape (2 = calm text list). */
+    val layoutVersion: Int = 0,
 ) {
     fun config(pkg: String): AppConfig = apps[pkg] ?: AppConfig()
 }

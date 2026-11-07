@@ -1,53 +1,51 @@
 package dev.pridgey.gates.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import dev.pridgey.gates.data.AppConfig
 import dev.pridgey.gates.data.GateType
@@ -57,33 +55,29 @@ import dev.pridgey.gates.data.Limits
 import dev.pridgey.gates.data.Reason
 import dev.pridgey.gates.data.formatMinutes
 
-/** One-tap time choices. Never a hold. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun TimeChips(choices: List<Pair<Int, Boolean>>, onPick: (Int) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        choices.forEach { (m, all) ->
-            Button(onClick = { onPick(m) }) { Text(if (all) "All ${m}m" else formatMinutes(m)) }
-        }
-    }
-}
-
 /** STILL-3: one paced breath (about 4s in, 6s out). Purely visual; never blocks a choice. */
 @Composable
 private fun BreathRing() {
-    val scale = remember { Animatable(0.4f) }
+    val scale = remember { Animatable(0.35f) }
+    var phase by remember { mutableStateOf("Breathe in") }
     LaunchedEffect(Unit) {
-        scale.animateTo(1f, tween(4000, easing = LinearOutSlowInEasing))
-        scale.animateTo(0.4f, tween(6000, easing = LinearOutSlowInEasing))
+        scale.animateTo(1f, tween(4000, easing = FastOutSlowInEasing))
+        phase = "and out"
+        scale.animateTo(0.35f, tween(6000, easing = FastOutSlowInEasing))
+        phase = ""
     }
     val color = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(64.dp)) {
-        drawCircle(color.copy(alpha = 0.6f), radius = size.minDimension / 2 * scale.value, style = Stroke(3.dp.toPx()))
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(Modifier.size(96.dp)) {
+            val r = size.minDimension / 2 * scale.value
+            drawCircle(color.copy(alpha = 0.12f), radius = r)
+            drawCircle(color.copy(alpha = 0.5f), radius = r, style = Stroke(1.5.dp.toPx()))
+        }
+        Text(phase, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-/** GATE-1 / GATE-3: Pause and Ask first sheets. */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/** GATE-1 / GATE-3: the Pause and Ask first sheets. */
 @Composable
 fun GateSheet(
     app: LaunchApp,
@@ -94,69 +88,108 @@ fun GateSheet(
     onSaveReason: (Reason) -> Unit,
     onCancel: () -> Unit,
 ) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onCancel, sheetState = sheet) {
-        Column(
-            Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AppGlyph(app, 40.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(app.label, style = MaterialTheme.typography.titleLarge)
-                    remaining?.let { Text("${formatMinutes(it)} left today", style = MaterialTheme.typography.bodySmall) }
-                }
-                if (LocalStill.current) BreathRing()
+    GSheet(onDismiss = onCancel) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Eyebrow(if (config.gate == GateType.ASK) "Ask first" else "Pause", config.gate)
+            SheetTitle(app.label, remaining?.let { "${formatMinutes(it)} left today" })
+            intro?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            intro?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            if (LocalStill.current) BreathRing() else Spacer(Modifier.height(24.dp))
 
             if (config.gate == GateType.ASK) {
-                Text("What are you opening it for?", style = MaterialTheme.typography.titleSmall)
-                config.reasons.forEach { r ->
-                    val m = remaining?.let { minOf(r.minutes, it) } ?: r.minutes
-                    OutlinedButton(onClick = { onPick(m, r.label) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(r.label, Modifier.weight(1f))
-                        Text(if (remaining != null && m == remaining && r.minutes >= remaining) "All ${m}m" else formatMinutes(m))
-                    }
-                }
-                var typed by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    label = { Text("Something else") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (typed.isNotBlank()) {
-                    TimeChips(Limits.choices(listOf(5, 10, 15), remaining)) { m ->
-                        onSaveReason(Reason(typed.trim(), m))
-                        onPick(m, typed.trim())
-                    }
-                }
+                AskChoices(config, remaining, onPick, onSaveReason)
             } else {
-                TimeChips(Limits.choices(config.pauseChoices, remaining)) { onPick(it, null) }
+                Text(
+                    "How long?", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                TimeChoices(Limits.choices(config.pauseChoices, remaining)) { onPick(it, null) }
             }
-            TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+            Spacer(Modifier.height(12.dp))
+            QuietButton("Not now", Modifier.fillMaxWidth(), onClick = onCancel)
         }
     }
 }
 
-/** TIME-3: opening an out-of-time app. */
 @Composable
-fun OutOfTimeDialog(app: LaunchApp, backAt: String, onBorrow: (Int) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("${app.label} is out of time") },
-        text = { Text("$backAt. You can borrow from tomorrow's time if you need it.") },
-        confirmButton = { Button(onClick = onDismiss) { Text("OK") } },
-        dismissButton = { TextButton(onClick = { onBorrow(10) }) { Text("Borrow 10m from tomorrow") } },
-    )
+private fun AskChoices(
+    config: AppConfig,
+    remaining: Int?,
+    onPick: (Int, String?) -> Unit,
+    onSaveReason: (Reason) -> Unit,
+) {
+    val haptics = rememberHaptics()
+    Text("What's it for?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp))
+    var typed by remember { mutableStateOf("") }
+    GroupCard {
+        config.reasons.forEachIndexed { i, r ->
+            if (i > 0) CardDivider()
+            val m = remaining?.let { minOf(r.minutes, it) } ?: r.minutes
+            val all = remaining != null && r.minutes >= remaining
+            RowItem(
+                title = r.label,
+                value = if (all) "all ${formatMinutes(m)}" else formatMinutes(m),
+                onClick = { haptics.confirm(); onPick(m, r.label) },
+            )
+        }
+        if (config.reasons.isNotEmpty()) CardDivider()
+        InlineField(typed, "Something else…", { typed = it.take(60) })
+    }
+    AnimatedVisibility(typed.isNotBlank(), enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+        Column {
+            Spacer(Modifier.height(12.dp))
+            TimeChoices(Limits.choices(listOf(5, 10, 15), remaining)) { m ->
+                val reason = typed.trim()
+                onSaveReason(Reason(reason, m))
+                onPick(m, reason)
+            }
+        }
+    }
+}
+
+/** A text field that sits inside a GroupCard like a row. */
+@Composable
+private fun InlineField(value: String, placeholder: String, onChange: (String) -> Unit, onDone: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) {
+                Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** TIME-3: opening an app that's out of time. Calm, never scolding. */
+@Composable
+fun OutOfTimeSheet(app: LaunchApp, backAt: String, onBorrow: (Int) -> Unit, onDismiss: () -> Unit) {
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Out of time")
+        SheetTitle("${app.label} is resting", "$backAt.")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "If you need it now, you can borrow from tomorrow's time.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(28.dp))
+        PrimaryButton("OK", Modifier.fillMaxWidth(), onClick = onDismiss)
+        Spacer(Modifier.height(10.dp))
+        TonalButton("Borrow 10 min from tomorrow", Modifier.fillMaxWidth()) { onBorrow(10) }
+    }
 }
 
 /** HOME-3 / APP-2: everything about one app, from a long-press or the Gates app. */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AppOptionsSheet(
     app: LaunchApp,
@@ -173,114 +206,91 @@ fun AppOptionsSheet(
     onAppInfo: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var newGroup by remember { mutableStateOf(false) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
-        Column(
-            Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+    GSheet(onDismiss = onDismiss) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AppGlyph(app, 40.dp)
-                Spacer(Modifier.width(12.dp))
+                AppGlyph(app, 44.dp)
+                Spacer(Modifier.width(16.dp))
                 Column {
                     Text(app.label, style = MaterialTheme.typography.titleLarge)
-                    remaining?.let { Text("${formatMinutes(it)} left today", style = MaterialTheme.typography.bodySmall) }
+                    Text(
+                        remaining?.let { "${formatMinutes(it)} left today" } ?: "No daily limit",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
-            SectionLabel("Gate")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GateType.entries.forEach { g ->
-                    FilterChip(
-                        selected = config.gate == g,
-                        onClick = { onChange { it.copy(gate = g) } },
-                        label = { Text(g.title) },
-                    )
-                }
+            SectionTitle("Gate")
+            Segmented(GateType.entries, config.gate, { if (it == GateType.ASK) "Ask" else it.title }) { g ->
+                onChange { it.copy(gate = g) }
             }
             Text(
                 when (config.gate) {
-                    GateType.NONE -> "Opens immediately."
-                    GateType.PAUSE -> "Pick a time, it opens for that long."
-                    GateType.ASK -> "Name a reason; it opens with that reason's time."
+                    GateType.NONE -> "Opens straight away."
+                    GateType.PAUSE -> "Pick a time; it opens for that long."
+                    GateType.ASK -> "Pick a reason; it opens for that reason's time and reminds you of it."
                     GateType.VAULT -> "Fingerprint every time. No timer."
                 },
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 10.dp),
             )
 
             if (config.gate == GateType.ASK) {
-                SectionLabel("Reasons")
-                config.reasons.forEach { r ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(r.label, Modifier.weight(1f))
-                        Text(formatMinutes(r.minutes), style = MaterialTheme.typography.bodySmall)
-                        IconButton(onClick = { onChange { c -> c.copy(reasons = c.reasons - r) } }) {
-                            Icon(Icons.Filled.Close, "Remove reason")
-                        }
-                    }
-                }
-                AddReasonRow { r -> onChange { c -> c.copy(reasons = c.reasons + r) } }
+                SectionTitle("Reasons")
+                ReasonsEditor(config.reasons) { reasons -> onChange { it.copy(reasons = reasons) } }
             }
 
-            SectionLabel("Daily limit")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf<Int?>(null, 15, 30, 60, 90, 120).forEach { m ->
-                    FilterChip(
-                        selected = config.dailyLimit == m,
-                        onClick = { onChange { it.copy(dailyLimit = m) } },
-                        label = { Text(m?.let(::formatMinutes) ?: "None") },
-                    )
+            SectionTitle("Daily limit")
+            PillRow {
+                listOf<Int?>(null, 15, 30, 45, 60, 90, 120).forEach { m ->
+                    Pill(m?.let(::formatMinutes) ?: "None", config.dailyLimit == m) { onChange { it.copy(dailyLimit = m) } }
                 }
             }
 
-            SectionLabel("Group")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = config.groupId == null,
-                    onClick = { onChange { it.copy(groupId = null) } },
-                    label = { Text("None") },
-                )
+            SectionTitle("Shared limit")
+            PillRow {
+                Pill("None", config.groupId == null) { onChange { it.copy(groupId = null) } }
                 groups.forEach { g ->
-                    FilterChip(
-                        selected = config.groupId == g.id,
-                        onClick = { onChange { it.copy(groupId = g.id) } },
-                        label = { Text("${g.name} · ${formatMinutes(g.limit)}") },
-                    )
+                    Pill("${g.name} · ${formatMinutes(g.limit)}", config.groupId == g.id) { onChange { it.copy(groupId = g.id) } }
                 }
-                AssistChip(onClick = { newGroup = true }, label = { Text("New group…") })
+                Pill("+ New group", false) { newGroup = true }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Move Upstairs when out of time", Modifier.weight(1f))
-                Switch(config.upstairsWhenOut, onCheckedChange = { v -> onChange { it.copy(upstairsWhenOut = v) } })
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Hide when lending the phone")
-                    if (config.gate == GateType.VAULT) Text("Vault apps are always hidden.", style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(
-                    config.hideWhenLending || config.gate == GateType.VAULT,
+            Spacer(Modifier.height(28.dp))
+            GroupCard {
+                ToggleRow("Move Upstairs when out of time", checked = config.upstairsWhenOut) { v -> onChange { it.copy(upstairsWhenOut = v) } }
+                CardDivider()
+                ToggleRow(
+                    "Hide when lending the phone",
+                    subtitle = if (config.gate == GateType.VAULT) "Vault apps are always hidden" else null,
+                    checked = config.hideWhenLending || config.gate == GateType.VAULT,
                     enabled = config.gate != GateType.VAULT,
-                    onCheckedChange = { v -> onChange { it.copy(hideWhenLending = v) } },
-                )
+                ) { v -> onChange { it.copy(hideWhenLending = v) } }
             }
 
-            HorizontalDivider()
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onChange { it.copy(manualUpstairs = !it.manualUpstairs) } }) {
-                    Text(if (config.manualUpstairs) "Bring down" else "Move Upstairs")
+            Spacer(Modifier.height(12.dp))
+            GroupCard {
+                RowItem(if (config.manualUpstairs) "Bring down from Upstairs" else "Move Upstairs") {
+                    onChange { it.copy(manualUpstairs = !it.manualUpstairs) }
                 }
-                OutlinedButton(onClick = onToggleHome) { Text(if (onHome) "Remove from home" else "Add to home") }
-                OutlinedButton(onClick = onToggleDock) { Text(if (onDock) "Remove from dock" else "Add to dock") }
-                if (onHome) OutlinedButton(onClick = onRearrange) { Text("Rearrange home") }
-                if (!app.isGates) OutlinedButton(onClick = onAppInfo) { Text("App info") }
+                CardDivider()
+                RowItem(if (onHome) "Remove from home" else "Add to home", onClick = onToggleHome)
+                if (onHome) {
+                    CardDivider()
+                    RowItem("Rearrange home", chevron = true, onClick = onRearrange)
+                }
+                CardDivider()
+                RowItem(if (onDock) "Remove from the bottom row" else "Add to the bottom row", onClick = onToggleDock)
+                if (!app.isGates) {
+                    CardDivider()
+                    RowItem("App info", chevron = true, onClick = onAppInfo)
+                }
             }
         }
     }
     if (newGroup) {
-        GroupDialog(
+        GroupSheet(
             group = null,
             onSave = { name, limit ->
                 val id = onNewGroup(name, limit)
@@ -293,70 +303,83 @@ fun AppOptionsSheet(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AddReasonRow(onAdd: (Reason) -> Unit) {
+private fun ReasonsEditor(reasons: List<Reason>, onChange: (List<Reason>) -> Unit) {
     var text by remember { mutableStateOf("") }
-    var minutes by remember { mutableStateOf(5) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
-            value = text, onValueChange = { text = it }, singleLine = true,
-            label = { Text("Add a reason") }, modifier = Modifier.fillMaxWidth(),
-            keyboardActions = KeyboardActions(onDone = {
-                if (text.isNotBlank()) { onAdd(Reason(text.trim(), minutes)); text = "" }
-            }),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        )
+    var minutes by remember { mutableIntStateOf(5) }
+    val add = {
         if (text.isNotBlank()) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(2, 5, 10, 15, 30).forEach { m ->
-                    FilterChip(selected = minutes == m, onClick = { minutes = m }, label = { Text(formatMinutes(m)) })
+            onChange(reasons + Reason(text.trim(), minutes))
+            text = ""
+        }
+    }
+    GroupCard {
+        reasons.forEachIndexed { i, r ->
+            if (i > 0) CardDivider()
+            RowItem(r.label, value = formatMinutes(r.minutes), trailing = {
+                Box(
+                    Modifier.padding(start = 8.dp).size(32.dp).clip(RoundedCornerShape(50)).pressable { onChange(reasons - r) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Close, "Remove", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
-                Button(onClick = { onAdd(Reason(text.trim(), minutes)); text = "" }) { Text("Add") }
+            })
+        }
+        if (reasons.isNotEmpty()) CardDivider()
+        InlineField(text, "Add a reason", { text = it.take(60) }, onDone = add)
+    }
+    AnimatedVisibility(text.isNotBlank()) {
+        Column(Modifier.padding(top = 12.dp)) {
+            PillRow {
+                listOf(2, 5, 10, 15, 30).forEach { m -> Pill(formatMinutes(m), minutes == m) { minutes = m } }
             }
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton("Add reason", Modifier.fillMaxWidth(), onClick = add)
         }
     }
 }
 
 /** APP-3: create, rename or delete a group. */
 @Composable
-fun GroupDialog(
+fun GroupSheet(
     group: Group?,
     onSave: (name: String, limit: Int) -> Unit,
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf(group?.name ?: "") }
-    var limit by remember { mutableStateOf(group?.limit?.toString() ?: "60") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (group == null) "New group" else "Edit group") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(
-                    limit, { limit = it.filter(Char::isDigit) },
-                    label = { Text("Shared daily limit (minutes)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text("Delete group", color = MaterialTheme.colorScheme.error) }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = name.isNotBlank() && (limit.toIntOrNull() ?: 0) > 0,
-                onClick = { onSave(name.trim(), limit.toInt()) },
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    var limit by remember { mutableIntStateOf(group?.limit ?: 60) }
+    GSheet(onDismiss = onDismiss) {
+        Eyebrow("Shared limit")
+        Text(if (group == null) "New group" else "Edit group", style = MaterialTheme.typography.displaySmall)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Apps in a group share one daily allowance.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(24.dp))
+        Box(Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) {
+            InlineField(name, "Name, e.g. Social", { name = it.take(24) })
+        }
+        SectionTitle("Together, per day")
+        PillRow {
+            listOf(15, 30, 45, 60, 90, 120, 180).forEach { m -> Pill(formatMinutes(m), limit == m) { limit = m } }
+        }
+        Spacer(Modifier.height(28.dp))
+        PrimaryButton("Save", Modifier.fillMaxWidth(), enabled = name.isNotBlank()) { onSave(name.trim(), limit) }
+        if (onDelete != null) {
+            Spacer(Modifier.height(4.dp))
+            QuietButton("Delete group", Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error, onClick = onDelete)
+        }
+    }
 }
 
+/** A quoted reason, used on time's up. */
 @Composable
-fun SectionLabel(text: String) {
-    Spacer(Modifier.height(4.dp))
-    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+fun ReasonQuote(reason: String) {
+    Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(2.dp).height(22.dp).background(MaterialTheme.colorScheme.primary))
+        Spacer(Modifier.width(12.dp))
+        Text("You came to: $reason", style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+    }
 }
-

@@ -1,7 +1,8 @@
 name: Build APK
 
 # Every push: unit tests + debug APK (run artifact).
-# Pushes to main also publish a GitHub Release with the APK attached.
+# Pushes to main also publish a GitHub Release with the APK attached; the app's
+# self-updater reads these releases.
 
 on:
   push:
@@ -35,7 +36,23 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --no-daemon
 
+      # The signing key comes from secrets so every build can update the installed app.
+      - name: Decode signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No signing secrets; this APK can't update installed copies."
+          else
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/gates.jks"
+            echo "SIGNING_STORE_FILE=$RUNNER_TEMP/gates.jks" >> "$GITHUB_ENV"
+          fi
+
       - name: Build debug APK
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon -PbuildNumber=${{ github.run_number }}
 
       - name: Name APK
@@ -57,6 +74,4 @@ jobs:
           gh release create "v$VERSION" "gates-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Gates $VERSION" \
-            --notes "Debug build of ${GITHUB_SHA::7}: $(git log -1 --format=%s)
-
-          Install the APK, then set Gates as your default home app. Builds share one signing key, so each one installs over the last."
+            --notes "$(git log -1 --format=%B | grep -v '^Co-Authored-By:')"

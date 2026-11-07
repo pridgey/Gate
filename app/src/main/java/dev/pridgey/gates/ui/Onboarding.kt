@@ -1,52 +1,106 @@
 package dev.pridgey.gates.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.pridgey.gates.data.Days
 
-/** RESET-6: one question, plus the one-time Still mode offer. */
-@OptIn(ExperimentalLayoutApi::class)
+/** First run, full screen (RESET-6 plus the one-time Still mode offer). */
 @Composable
 fun Onboarding(onDone: (resetMinutes: Int, still: Boolean) -> Unit) {
-    var reset by remember { mutableStateOf(6 * 60) }
+    var step by remember { mutableIntStateOf(0) }
+    var reset by remember { mutableIntStateOf(6 * 60) }
     var still by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = {},
-        title = { Text("When does your day usually start?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Daily limits refill then, not at midnight.", style = MaterialTheme.typography.bodySmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(5 * 60, 6 * 60, 7 * 60, 8 * 60, 9 * 60).forEach { m ->
-                        FilterChip(selected = reset == m, onClick = { reset = m }, label = { Text(Days.formatTime(m)) })
+    Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+            // Swallow touches so nothing behind reacts.
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
+            .statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp),
+    ) {
+        AnimatedContent(
+            step,
+            transitionSpec = {
+                (slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = 400f)) { it / 6 } + fadeIn(tween(220)))
+                    .togetherWith(fadeOut(tween(120)))
+            },
+            label = "onboarding",
+        ) { s ->
+            Column(Modifier.fillMaxSize()) {
+                Spacer(Modifier.height(72.dp))
+                when (s) {
+                    0 -> {
+                        Eyebrow("Welcome to Gates")
+                        Text("When does your day usually start?", style = MaterialTheme.typography.displayMedium)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Daily limits refill then, not at midnight, so late nights never come with a fresh allowance.",
+                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(32.dp))
+                        GroupCard {
+                            listOf(5, 6, 7, 8, 9).forEachIndexed { i, h ->
+                                if (i > 0) CardDivider()
+                                RowItem(
+                                    Days.formatTime(h * 60),
+                                    trailing = {
+                                        if (reset == h * 60) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    },
+                                ) { reset = h * 60 }
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        PrimaryButton("Continue", Modifier.fillMaxWidth().padding(bottom = 16.dp)) { step = 1 }
                     }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Still mode")
-                        Text("A calmer look and a slow breath on gates. Off by default.", style = MaterialTheme.typography.bodySmall)
+                    else -> {
+                        Eyebrow("One more thing")
+                        Text("Want a calmer phone?", style = MaterialTheme.typography.displayMedium)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Still mode adds warm, quiet colours, a slow breath when you open a gated app, and a soft fade when time's up. You can change it any time.",
+                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(32.dp))
+                        GroupCard { ToggleRow("Still mode", checked = still) { still = it } }
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            "To gate an app, long-press it on the home screen.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        PrimaryButton("Start", Modifier.fillMaxWidth()) { onDone(reset, still) }
+                        QuietButton("Back", Modifier.fillMaxWidth().padding(bottom = 8.dp)) { step = 0 }
                     }
-                    Switch(still, onCheckedChange = { still = it })
                 }
             }
-        },
-        confirmButton = { Button(onClick = { onDone(reset, still) }) { Text("Done") } },
-    )
+        }
+    }
 }

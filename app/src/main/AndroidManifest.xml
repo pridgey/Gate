@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Self-updates from the public releases repo. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Time used per app, for limits and Upstairs (user grants in Settings). -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -134,6 +137,10 @@
                 android:name="com.sameerasw.island.provider.priority"
                 android:value="30" />
         </service>
+
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
 
         <service
             android:name=".timer.TimerService"

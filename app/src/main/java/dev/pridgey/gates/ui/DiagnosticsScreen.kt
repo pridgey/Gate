@@ -82,7 +82,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 )
             }
 
-            item { SectionLabel("1 · What's on this phone") }
+            item { SectionTitle("1 · What's on this phone") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -107,7 +107,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 }
             }
 
-            item { SectionLabel("2 · Try each timer style") }
+            item { SectionTitle("2 · Try each timer style") }
             item {
                 Text(
                     "Post one, look at the island and the status bar, then mark what you saw. Each lasts 5 minutes.",
@@ -117,7 +117,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
             items(IslandTests.variants, key = { it.key }) { v -> VariantCard(v) }
             item { OutlinedButton(onClick = { IslandTests.clearAll(context) }) { Text("Clear test notifications") } }
 
-            item { SectionLabel("3 · Capture one the island does show") }
+            item { SectionTitle("3 · Capture one the island does show") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -142,7 +142,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 }
             }
 
-            item { SectionLabel("4 · Anything else you noticed") }
+            item { SectionTitle("4 · Anything else you noticed") }
             item {
                 var note by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -151,7 +151,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 }
             }
 
-            item { SectionLabel("5 · Send the report") }
+            item { SectionTitle("5 · Send the report") }
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { DiagLog.share(context) }) { Text("Share report") }
@@ -170,7 +170,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 )
             }
 
-            item { SectionLabel("Log (latest last)") }
+            item { SectionTitle("Log (latest last)") }
             items(log.takeLast(60)) { line ->
                 Text(line, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 12.sp)
             }
