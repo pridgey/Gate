@@ -74,9 +74,7 @@ class Store(context: Context) {
                     .put("pendingResetMinutes", it.pendingResetMinutes ?: JSONObject.NULL)
                     .put("stillMode", it.stillMode)
                     .put("timerDisplay", it.timerDisplay.name)
-                    .put("gateFromNotifications", it.gateFromNotifications)
                     .put("onboarded", it.onboarded)
-                    .put("showGatesTile", it.showGatesTile)
                     .put("gatesIntroSeen", it.gatesIntroSeen)
                     .put("stillFrom", it.stillFrom ?: JSONObject.NULL)
                     .put("lending", it.lending)
@@ -98,10 +96,6 @@ class Store(context: Context) {
                         .put("borrowed", mapToJson(it.borrowed)))
                 }
             })
-            put("home", JSONArray(s.home))
-            put("dock", JSONArray(s.dock))
-            put("homeInitialized", s.homeInitialized)
-            put("layoutVersion", s.layoutVersion)
             s.session?.let {
                 put("session", JSONObject()
                     .put("pkg", it.pkg).put("label", it.label)
@@ -114,8 +108,6 @@ class Store(context: Context) {
             .put("gate", c.gate.name)
             .put("dailyLimit", c.dailyLimit ?: JSONObject.NULL)
             .put("groupId", c.groupId ?: JSONObject.NULL)
-            .put("manualUpstairs", c.manualUpstairs)
-            .put("upstairsWhenOut", c.upstairsWhenOut)
             .put("reasons", JSONArray().apply {
                 c.reasons.forEach { put(JSONObject().put("label", it.label).put("minutes", it.minutes)) }
             })
@@ -138,9 +130,7 @@ class Store(context: Context) {
                     pendingResetMinutes = it.optIntOrNull("pendingResetMinutes"),
                     stillMode = it.optBoolean("stillMode"),
                     timerDisplay = enumOr(it.optString("timerDisplay"), TimerDisplay.AUTOMATIC),
-                    gateFromNotifications = it.optBoolean("gateFromNotifications"),
                     onboarded = it.optBoolean("onboarded"),
-                    showGatesTile = it.optBoolean("showGatesTile", true),
                     gatesIntroSeen = it.optBoolean("gatesIntroSeen"),
                     stillFrom = it.optIntOrNull("stillFrom"),
                     lending = it.optBoolean("lending"),
@@ -170,10 +160,6 @@ class Store(context: Context) {
                 groups = groups,
                 settings = settings,
                 ledger = ledger,
-                home = o.optJSONArray("home").toStringList(),
-                dock = o.optJSONArray("dock").toStringList(),
-                homeInitialized = o.optBoolean("homeInitialized"),
-                layoutVersion = o.optInt("layoutVersion"),
                 session = session,
                 history = o.optJSONArray("history")?.let { arr ->
                     (0 until arr.length()).map {
@@ -193,8 +179,6 @@ class Store(context: Context) {
             gate = enumOr(o.optString("gate"), GateType.NONE),
             dailyLimit = o.optIntOrNull("dailyLimit"),
             groupId = if (o.isNull("groupId")) null else o.optString("groupId"),
-            manualUpstairs = o.optBoolean("manualUpstairs"),
-            upstairsWhenOut = o.optBoolean("upstairsWhenOut", true),
             reasons = o.optJSONArray("reasons")?.let { arr ->
                 (0 until arr.length()).map {
                     val r = arr.getJSONObject(it)
@@ -209,9 +193,6 @@ class Store(context: Context) {
 
         private fun JSONObject.optIntOrNull(key: String): Int? =
             if (!has(key) || isNull(key)) null else getInt(key)
-
-        private fun JSONArray?.toStringList(): List<String> =
-            this?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
 
         private fun mapToJson(m: Map<String, Int>) =
             JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }

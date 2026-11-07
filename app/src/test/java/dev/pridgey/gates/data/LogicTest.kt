@@ -62,11 +62,10 @@ class LimitsTest {
         assertNull(Limits.remaining(state, "bank", emptyMap()))
     }
 
-    @Test fun outOfTimeGoesUpstairs() {
+    @Test fun sharedLimitRunsOut() {
         val usage = mapOf("feed" to 45)
         assertTrue(Limits.isOutOfTime(state, "video", usage))
-        assertTrue(Limits.isUpstairs(state, "video", usage))
-        assertFalse(Limits.isUpstairs(state, "bank", usage))
+        assertFalse(Limits.isOutOfTime(state, "bank", usage))
     }
 
     @Test fun choicesNeverExceedRemaining() {

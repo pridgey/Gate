@@ -28,10 +28,6 @@ data class AppConfig(
     /** Own daily limit in minutes, or null for none. */
     val dailyLimit: Int? = null,
     val groupId: String? = null,
-    /** The user put this app Upstairs themselves. */
-    val manualUpstairs: Boolean = false,
-    /** Move Upstairs automatically when out of time. */
-    val upstairsWhenOut: Boolean = true,
     /** Ask first reasons; typed reasons are appended here. */
     val reasons: List<Reason> = DefaultReasons,
     val pauseChoices: List<Int> = listOf(5, 10, 15),
@@ -48,9 +44,7 @@ data class Settings(
     val pendingResetMinutes: Int? = null,
     val stillMode: Boolean = false,
     val timerDisplay: TimerDisplay = TimerDisplay.AUTOMATIC,
-    val gateFromNotifications: Boolean = false,
     val onboarded: Boolean = false,
-    val showGatesTile: Boolean = true,
     val gatesIntroSeen: Boolean = false,
     /** Still mode only from this time until the reset; null = always (STILL-1). */
     val stillFrom: Int? = null,
@@ -102,13 +96,8 @@ data class GatesState(
     val groups: List<Group> = emptyList(),
     val settings: Settings = Settings(),
     val ledger: Ledger = Ledger(),
-    val home: List<String> = emptyList(),
-    val dock: List<String> = emptyList(),
-    val homeInitialized: Boolean = false,
     val session: Session? = null,
     val history: List<DaySummary> = emptyList(),
-    /** Bumped when the home layout changes shape (2 = calm text list). */
-    val layoutVersion: Int = 0,
 ) {
     fun config(pkg: String): AppConfig = apps[pkg] ?: AppConfig()
 }

@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -72,7 +71,6 @@ fun GatesScreen(
     onEditApp: (LaunchApp) -> Unit,
     onDiagnostics: () -> Unit,
     onAuth: (label: String, onSuccess: () -> Unit) -> Unit,
-    onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     val settings = state.settings
@@ -80,7 +78,7 @@ fun GatesScreen(
     var editGroup by remember { mutableStateOf<Group?>(null) }
     var newGroup by remember { mutableStateOf(false) }
     val gated = apps.filter { state.config(it.pkg).gate != GateType.NONE }
-    val ungated = apps.filter { state.config(it.pkg).gate == GateType.NONE && !it.isGates }
+    val ungated = apps.filter { state.config(it.pkg).gate == GateType.NONE }
 
     LaunchedEffect(Unit) { vm.refreshUsage() }
     // Re-read on recomposition; returning from Settings triggers one via the usage refresh.
@@ -94,20 +92,15 @@ fun GatesScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
         ) {
             item {
-                Row(Modifier.padding(top = 28.dp, start = 4.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Gates", style = MaterialTheme.typography.displayMedium)
-                        Text(
-                            "${gated.size} gated · ${ungated.size} open as usual",
-                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer).pressable(onClick = onClose),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Outlined.Close, "Close", modifier = Modifier.size(20.dp))
-                    }
+                Column(Modifier.padding(top = 28.dp, start = 4.dp)) {
+                    Text("Gates", style = MaterialTheme.typography.displayMedium)
+                    Text(
+                        when {
+                            !a11yOn && gated.isNotEmpty() -> "Gates are off until you allow them below"
+                            else -> "${gated.size} gated · ${ungated.size} open as usual"
+                        },
+                        style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -120,7 +113,7 @@ fun GatesScreen(
 
             if (!settings.gatesIntroSeen) item {
                 Note(
-                    "Gates puts a pause only where you ask for one. Long-press any app to give it a gate, a limit or a group, or to make it a favorite on home.",
+                    "Gates puts a pause only where you ask for one. Tap Add a gate to give an app a gate, a daily limit or a shared limit. It shows up whenever you open that app.",
                     "Got it",
                 ) { vm.updateSettings { it.copy(gatesIntroSeen = true) } }
             }
@@ -130,12 +123,12 @@ fun GatesScreen(
                 item { SectionTitle("Finish setting up") }
                 item {
                     GroupCard {
-                        SetupRow("Usage access", "Needed for daily limits", hasUsageAccess) {
-                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        SetupRow("Turn on gates", "Accessibility: lets Gates step in when a gated app opens", a11yOn) {
+                            GateAccessibilityService.openSettings(context)
                         }
                         CardDivider()
-                        SetupRow("Gate every way in", "From notifications and recents", a11yOn) {
-                            GateAccessibilityService.openSettings(context)
+                        SetupRow("Usage access", "Needed for daily limits", hasUsageAccess) {
+                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
                         CardDivider()
                         SetupRow("Show over other apps", "Timer pill and time's-up sheet", overlayOn) {
@@ -235,15 +228,6 @@ fun GatesScreen(
                         value = if (island && settings.timerDisplay in setOf(TimerDisplay.AUTOMATIC, TimerDisplay.ISLAND)) "On the island" else settings.timerDisplay.title,
                         chevron = true,
                     ) { sheet = SettingSheet.TIMER }
-                    CardDivider()
-                    ToggleRow(
-                        "Gate opens from notifications",
-                        subtitle = if (a11yOn) "And from recents and other apps" else "Turn on “Gate every way in” first",
-                        checked = settings.gateFromNotifications && a11yOn,
-                        enabled = a11yOn,
-                    ) { v -> vm.updateSettings { it.copy(gateFromNotifications = v) } }
-                    CardDivider()
-                    ToggleRow("Show Gates on home", checked = settings.showGatesTile) { v -> vm.updateSettings { it.copy(showGatesTile = v) } }
                 }
             }
 
@@ -253,12 +237,11 @@ fun GatesScreen(
                 GroupCard {
                     ToggleRow(
                         "Lend the phone",
-                        subtitle = "Hides Vault apps, apps you choose and Gates. Ending it needs your fingerprint.",
+                        subtitle = "Blocks Vault apps and apps you choose, and locks Gates. Ending it needs your fingerprint.",
                         checked = settings.lending,
                     ) { on ->
                         if (on) {
                             vm.updateSettings { it.copy(lending = true) }
-                            onClose()
                         } else {
                             onAuth("End lending") { vm.updateSettings { it.copy(lending = false) } }
                         }
@@ -352,7 +335,6 @@ private fun GatedRow(app: LaunchApp, state: GatesState, usage: Map<String, Int>,
         cfg.dailyLimit?.let { "${formatMinutes(it)} a day" },
         group?.name,
         left?.let { "${formatMinutes(it)} left" },
-        "Upstairs".takeIf { cfg.manualUpstairs },
     ).joinToString(" · ")
     RowItem(
         app.label,
@@ -417,13 +399,25 @@ private fun WeeklyCard(state: GatesState, apps: List<LaunchApp>, usage: Map<Stri
 
 @Composable
 private fun PickerSheet(apps: List<LaunchApp>, onPick: (LaunchApp) -> Unit, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val shown = remember(apps, query) {
+        val q = query.trim()
+        if (q.isEmpty()) apps
+        else apps.filter { it.label.contains(q, ignoreCase = true) }
+            .sortedBy { if (it.label.startsWith(q, ignoreCase = true)) 0 else 1 }
+    }
     GSheet(onDismiss = onDismiss) {
         Eyebrow("Add a gate")
         Text("Which app?", style = MaterialTheme.typography.displaySmall)
         Spacer(Modifier.height(16.dp))
+        Box(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) {
+            InlineField(query, "Search apps", { query = it.take(40) })
+        }
+        Spacer(Modifier.height(12.dp))
         GroupCard {
-            LazyColumn(Modifier.heightIn(max = 460.dp)) {
-                items(apps, key = { it.pkg }) { app ->
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                if (shown.isEmpty()) item { RowItem("Nothing called “$query”") }
+                items(shown, key = { it.pkg }) { app ->
                     RowItem(app.label, leading = { AppGlyph(app, 30.dp) }) { onPick(app) }
                 }
             }

@@ -20,12 +20,18 @@ class GatesApp : Application() {
         super.onCreate()
         store = Store(this)
         store.ensureDay()
+        // Keep crashes in the diagnostics log so they can be read on the phone.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            runCatching { dev.pridgey.gates.diag.DiagLog.add(this, "crash", "${thread.name}: ${android.util.Log.getStackTraceString(e)}") }
+            previous?.uncaughtException(thread, e)
+        }
     }
 }
 
 val Context.store: Store get() = (applicationContext as GatesApp).store
 
-/** Shared actions used by the launcher, the timer service and the time's-up sheet. */
+/** Shared actions used by the Gates screen, the gate sheets, the timer service and the time's-up sheet. */
 object Gates {
     /** Minutes used today per package: usage stats when allowed, else timed-session totals. */
     fun usage(context: Context): Map<String, Int> {
@@ -74,10 +80,10 @@ object Gates {
         TimerService.stop(context)
     }
 
+    /** Back to the user's home screen, whichever launcher that is. */
     fun goHome(context: Context) {
         context.startActivity(
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                .setPackage(context.packageName)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }

@@ -115,24 +115,7 @@ private val Still = darkColorScheme(
     error = Color(0xFFE8B4A6),
 )
 
-/** Colors for things drawn straight on the wallpaper (home, All apps, Upstairs). */
-data class WallpaperInk(val primary: Color, val secondary: Color, val faint: Color, val scrim: Color)
-
-private val NormalInk = WallpaperInk(
-    primary = Color(0xFFFFFFFF),
-    secondary = Color(0xB3FFFFFF),
-    faint = Color(0x66FFFFFF),
-    scrim = Color(0xFF0B0C0B),
-)
-private val StillInk = WallpaperInk(
-    primary = Color(0xFFEADCC6),
-    secondary = Color(0x99EADCC6),
-    faint = Color(0x55EADCC6),
-    scrim = Color(0xFF120E0A),
-)
-
 val LocalStill = compositionLocalOf { false }
-val LocalInk = compositionLocalOf { NormalInk }
 
 @Composable
 fun GatesTheme(still: Boolean = false, content: @Composable () -> Unit) {
@@ -141,10 +124,7 @@ fun GatesTheme(still: Boolean = false, content: @Composable () -> Unit) {
         isSystemInDarkTheme() -> Dark
         else -> Light
     }
-    CompositionLocalProvider(
-        LocalStill provides still,
-        LocalInk provides if (still) StillInk else NormalInk,
-    ) {
+    CompositionLocalProvider(LocalStill provides still) {
         MaterialTheme(colorScheme = scheme, typography = GatesType) {
             // Text and icons without their own color follow the theme, never default black.
             CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides scheme.onSurface, content = content)

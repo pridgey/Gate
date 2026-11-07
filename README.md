@@ -1,7 +1,9 @@
 # Gates
 
-An Android launcher that puts friction only where you ask for it. See
-[the PRD](<Gates — Product Requirements (v1).md>).
+An Android app that puts friction only where you ask for it: pick an app, give it a gate,
+and Gates steps in whenever that app opens. It works alongside whatever launcher you use.
+See [the PRD](<Gates — Product Requirements (v1).md>) (written when Gates was a launcher;
+the home screen parts no longer apply).
 
 **Status: rough first draft.** Kotlin + Jetpack Compose, minSdk 30.
 
@@ -21,27 +23,29 @@ Build locally (needs JDK 17 and the Android SDK):
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Then pick Gates as the default home app.
+Then open Gates and allow **Turn on gates** (an accessibility service). Gates can't step
+in without it.
 
 ## What's in this draft
 
-- Home grid, dock, clock; swipe up for All apps + search, swipe down for notifications;
-  rearrange home (long-press → Rearrange home, then drag)
-- Gates: Pause, Ask first (reasons, typed reasons saved), Vault (system biometric prompt)
-- Long-press any icon: gate, daily limit, group, Upstairs, home/dock, hide when lending, app info
-- Daily limits and shared group limits from usage stats; "12m left" labels
-- Upstairs bar and shelf; out-of-time sheet with Borrow from tomorrow
+- Gates: Pause, Ask first (reasons, typed reasons saved), Vault (system biometric prompt),
+  shown over the app as it opens, from anywhere (home, notifications, recents, other apps)
+- Add a gate → pick an app: gate, daily limit, shared limit, hide when lending, app info
+- Daily limits and shared group limits from usage stats; out-of-time sheet with Borrow from tomorrow
+- Going back to the home screen ends a session (after a 5-second grace, so a trip through
+  recents back into the same app doesn't)
 - Session timer: ongoing notification (requests the Android 16 Live Update chip),
   overhead pill (hidden in full-screen apps), time's-up sheet with Close / More time
 - Daily reset at 6:00 am by default; changes apply from the next reset
-- The Gates app: gated apps by type, weekly summary, groups, settings, first-run question
+- The Gates screen: setup checklist, gated apps by type, weekly summary, groups, settings,
+  first-run question
 - Still mode: warm palette, breath ring on gate sheets, optional evening schedule,
   soft exit at time's up (true grayscale after
   `adb shell pm grant dev.pridgey.gates android.permission.WRITE_SECURE_SETTINGS`,
   otherwise a gray fade)
-- Optional accessibility service: gates apps opened from notifications, recents and other
-  apps; detects full screen; enforces Lending mode
-- Lending mode: hides Vault apps and chosen apps; ending it needs your fingerprint
+- Accessibility service (required): shows gates, ends sessions on home, detects full
+  screen, enforces Lending mode
+- Lending mode: blocks Vault apps and chosen apps and locks Gates; ending it needs your fingerprint
 
 ## Dynamic island (Essentials)
 

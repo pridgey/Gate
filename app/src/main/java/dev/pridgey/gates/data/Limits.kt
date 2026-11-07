@@ -26,11 +26,6 @@ object Limits {
     fun isOutOfTime(s: GatesState, pkg: String, usage: Map<String, Int>): Boolean =
         remaining(s, pkg, usage) == 0
 
-    fun isUpstairs(s: GatesState, pkg: String, usage: Map<String, Int>): Boolean {
-        val cfg = s.apps[pkg] ?: return false
-        return cfg.manualUpstairs || (cfg.upstairsWhenOut && isOutOfTime(s, pkg, usage))
-    }
-
     /**
      * Pause time choices, never more than what's left (GATE-2). The last chip is
      * "All Nm" when it equals the time left. Returns (minutes, isAll) pairs.

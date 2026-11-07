@@ -430,29 +430,6 @@ fun GateMark(gate: GateType, color: Color, size: Dp = 16.dp) {
     }
 }
 
-/** A five-point star, outlined or filled, for favorites. */
-@Composable
-fun StarMark(filled: Boolean, color: Color, size: Dp = 16.dp) {
-    Canvas(Modifier.size(size)) {
-        val w = this.size.minDimension
-        val c = Offset(w / 2, w / 2 + w * 0.04f)
-        val outer = w * 0.48f
-        val inner = outer * 0.45f
-        val path = androidx.compose.ui.graphics.Path().apply {
-            for (i in 0 until 10) {
-                val r = if (i % 2 == 0) outer else inner
-                val a = Math.toRadians(-90.0 + i * 36.0)
-                val x = c.x + r * kotlin.math.cos(a).toFloat()
-                val y = c.y + r * kotlin.math.sin(a).toFloat()
-                if (i == 0) moveTo(x, y) else lineTo(x, y)
-            }
-            close()
-        }
-        if (filled) drawPath(path, color)
-        else drawPath(path, color, style = Stroke(w * 0.08f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-    }
-}
-
 /** The top of every app sheet: icon, name, and one quiet line of context. */
 @Composable
 fun SheetAppHeader(app: LaunchApp, line: String?, trailing: (@Composable () -> Unit)? = null) {

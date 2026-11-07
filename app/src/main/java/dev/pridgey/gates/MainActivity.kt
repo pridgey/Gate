@@ -12,20 +12,17 @@ import android.os.Bundle
 import android.os.CancellationSignal
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pridgey.gates.ui.GatesTheme
-import dev.pridgey.gates.ui.LauncherRoot
-import dev.pridgey.gates.ui.LauncherViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
+import dev.pridgey.gates.ui.GatesRoot
+import dev.pridgey.gates.ui.GatesViewModel
 
 class MainActivity : ComponentActivity() {
-    private val vm: LauncherViewModel by viewModels()
-    private val homePresses = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val vm: GatesViewModel by viewModels()
 
     private val packageChanges = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -51,21 +48,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by vm.state.collectAsStateWithLifecycle()
             GatesTheme(still = state.settings.stillActive()) {
-                BackHandler { /* Back on home does nothing, as on other launchers. */ }
-                LauncherRoot(vm, homePresses, onVault = ::authenticate)
+                GatesRoot(vm, onAuth = ::authenticate)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        vm.onHomeResumed()
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        // Home pressed while already home: close any open panel.
-        homePresses.tryEmit(Unit)
+        vm.onResume()
     }
 
     override fun onDestroy() {
@@ -73,10 +63,10 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** GATE-4: the system biometric prompt, falling back to PIN. No extra screen. */
+    /** The system biometric prompt, falling back to PIN. No extra screen. */
     private fun authenticate(label: String, onSuccess: () -> Unit) {
         val prompt = BiometricPrompt.Builder(this)
-            .setTitle("Open $label")
+            .setTitle(label)
             .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL)
             .build()
         prompt.authenticate(

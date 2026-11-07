@@ -5,6 +5,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -19,14 +21,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Optional accessibility service. It only looks at which package is in front and
- * whether the status bar is showing. It is used to:
- *  - gate apps opened from notifications, recents or other apps (GATE-5, SET-1)
+ * The accessibility service that makes gates work. It only looks at which package is
+ * in front and whether the status bar is showing. It is used to:
+ *  - show an app's gate whenever it opens, from anywhere (GATE-5)
+ *  - end a running session when the user goes back to the home screen
  *  - hide the timer while the foreground app is full screen (TIMER-1)
  *  - start the time's-up sheet and Still mode's soft exit over other apps (STILL-4)
  */
 class GateAccessibilityService : AccessibilityService() {
     private var lastPkg: String? = null
+    private val handler = Handler(Looper.getMainLooper())
     private val ignored = mutableSetOf<String>()
 
     override fun onServiceConnected() {
@@ -38,6 +42,7 @@ class GateAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         instance = null
+        handler.removeCallbacksAndMessages(null)
         _fullscreen.value = false
         return super.onUnbind(intent)
     }
@@ -57,7 +62,11 @@ class GateAccessibilityService : AccessibilityService() {
     private fun onAppInFront(pkg: String) {
         // Leaving an approved app means the next open needs its gate again.
         if (approved != null && approved != pkg) approved = null
-        if (pkg == packageName || pkg == homePackage()) return
+        if (pkg == packageName) return
+        if (pkg == homePackage()) {
+            endSessionIfStillAway()
+            return
+        }
 
         val s = store.state.value
         // LEND-1: hidden apps can't be reached any other way either.
@@ -66,18 +75,33 @@ class GateAccessibilityService : AccessibilityService() {
             Gates.goHome(this)
             return
         }
-        if (!s.settings.gateFromNotifications) return
         if (pkg == approved || s.session?.pkg == pkg) return
         val cfg = s.apps[pkg] ?: return
         val outOfTime = cfg.gate != GateType.VAULT && Limits.isOutOfTime(s, pkg, Gates.usage(this))
         if (cfg.gate == GateType.NONE && !outOfTime) return
 
-        DiagLog.add(this, "a11y", "gating $pkg opened outside the launcher (gate=${cfg.gate}, outOfTime=$outOfTime)")
+        DiagLog.add(this, "a11y", "gating $pkg (gate=${cfg.gate}, outOfTime=$outOfTime)")
         startActivity(
             Intent(this, GateActivity::class.java)
                 .putExtra(GateActivity.EXTRA_PKG, pkg)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
         )
+    }
+
+    /**
+     * Going home ends a running session; its time is counted. Recents usually belongs to the
+     * home app too, so wait a moment: switching straight back into the app keeps its session.
+     */
+    private fun endSessionIfStillAway() {
+        val session = store.state.value.session ?: return
+        handler.removeCallbacksAndMessages(null)
+        handler.postDelayed({
+            val now = store.state.value.session
+            if (now != null && now.startedAt == session.startedAt && _foreground.value != now.pkg) {
+                DiagLog.add(this, "a11y", "left ${now.pkg} via home: ended session")
+                Gates.endSession(this)
+            }
+        }, HOME_GRACE_MS)
     }
 
     /**
@@ -104,6 +128,8 @@ class GateAccessibilityService : AccessibilityService() {
     )?.activityInfo?.packageName
 
     companion object {
+        private const val HOME_GRACE_MS = 5_000L
+
         @Volatile
         var instance: GateAccessibilityService? = null
             private set

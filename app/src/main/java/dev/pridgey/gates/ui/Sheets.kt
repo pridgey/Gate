@@ -172,7 +172,7 @@ private fun AskChoices(
 
 /** A text field that sits inside a GroupCard like a row. */
 @Composable
-private fun InlineField(value: String, placeholder: String, onChange: (String) -> Unit, onDone: (() -> Unit)? = null) {
+internal fun InlineField(value: String, placeholder: String, onChange: (String) -> Unit, onDone: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) {
@@ -210,19 +210,14 @@ fun OutOfTimeSheet(app: LaunchApp, backAt: String, onBorrow: (Int) -> Unit, onDi
     }
 }
 
-/** HOME-3 / APP-2: everything about one app, from a long-press or the Gates app. */
+/** APP-2: everything about one app's gate and limits. */
 @Composable
 fun AppOptionsSheet(
     app: LaunchApp,
     config: AppConfig,
     groups: List<Group>,
-    onHome: Boolean,
-    onDock: Boolean,
     remaining: Int?,
     onChange: ((AppConfig) -> AppConfig) -> Unit,
-    onToggleHome: () -> Unit,
-    onToggleDock: () -> Unit,
-    onRearrange: () -> Unit,
     onNewGroup: (name: String, limit: Int) -> String,
     onAppInfo: () -> Unit,
     onDismiss: () -> Unit,
@@ -230,11 +225,7 @@ fun AppOptionsSheet(
     var newGroup by remember { mutableStateOf(false) }
     GSheet(onDismiss = onDismiss) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SheetAppHeader(
-                app,
-                remaining?.let { "${spokenMinutes(it)} left today" } ?: "No daily limit",
-                trailing = { FavoriteButton(onHome, onToggleHome) },
-            )
+            SheetAppHeader(app, remaining?.let { "${spokenMinutes(it)} left today" } ?: "No daily limit")
 
             SectionTitle("Gate")
             Segmented(GateType.entries, config.gate, { if (it == GateType.ASK) "Ask" else it.title }) { g ->
@@ -274,8 +265,6 @@ fun AppOptionsSheet(
 
             Spacer(Modifier.height(28.dp))
             GroupCard {
-                ToggleRow("Move Upstairs when out of time", checked = config.upstairsWhenOut) { v -> onChange { it.copy(upstairsWhenOut = v) } }
-                CardDivider()
                 ToggleRow(
                     "Hide when lending the phone",
                     subtitle = if (config.gate == GateType.VAULT) "Vault apps are always hidden" else null,
@@ -286,19 +275,7 @@ fun AppOptionsSheet(
 
             Spacer(Modifier.height(12.dp))
             GroupCard {
-                RowItem(if (config.manualUpstairs) "Bring down from Upstairs" else "Move Upstairs") {
-                    onChange { it.copy(manualUpstairs = !it.manualUpstairs) }
-                }
-                if (onHome) {
-                    CardDivider()
-                    RowItem("Rearrange favorites", chevron = true, onClick = onRearrange)
-                }
-                CardDivider()
-                RowItem(if (onDock) "Remove from the bottom row" else "Add to the bottom row", onClick = onToggleDock)
-                if (!app.isGates) {
-                    CardDivider()
-                    RowItem("App info", chevron = true, onClick = onAppInfo)
-                }
+                RowItem("App info", chevron = true, onClick = onAppInfo)
             }
         }
     }
@@ -397,24 +374,5 @@ fun ReasonQuote(reason: String) {
         Text("YOU CAME TO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
         Text(reason, style = MaterialTheme.typography.titleLarge, fontStyle = FontStyle.Italic)
-    }
-}
-
-/** Favorite toggle: favorites are the apps on the home screen. */
-@Composable
-private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit) {
-    val haptics = rememberHaptics()
-    val bg by androidx.compose.animation.animateColorAsState(
-        if (favorite) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh, label = "fav",
-    )
-    val fg = if (favorite) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-    Row(
-        Modifier.clip(RoundedCornerShape(50)).background(bg).pressable { haptics.confirm(); onToggle() }
-            .padding(start = 12.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StarMark(favorite, fg, 16.dp)
-        Spacer(Modifier.width(6.dp))
-        Text("Favorite", style = MaterialTheme.typography.labelMedium, color = fg)
     }
 }

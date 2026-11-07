@@ -92,7 +92,7 @@ fun Onboarding(onDone: (resetMinutes: Int, still: Boolean) -> Unit) {
                         GroupCard { ToggleRow("Still mode", checked = still) { still = it } }
                         Spacer(Modifier.height(24.dp))
                         Text(
-                            "Long-press any app to gate it or make it a favorite on home.",
+                            "Next, turn on gates and pick the apps that get one.",
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.weight(1f))
