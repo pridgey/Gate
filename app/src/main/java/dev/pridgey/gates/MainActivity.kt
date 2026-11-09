@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pridgey.gates.diag.DiagLog
 import dev.pridgey.gates.ui.GatesTheme
 import dev.pridgey.gates.ui.GatesRoot
 import dev.pridgey.gates.ui.GatesViewModel
@@ -65,21 +66,27 @@ class MainActivity : ComponentActivity() {
 
     /** The system biometric prompt, falling back to PIN. No extra screen. */
     private fun authenticate(label: String, onSuccess: () -> Unit) {
-        val prompt = BiometricPrompt.Builder(this)
-            .setTitle(label)
-            .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL)
-            .build()
-        prompt.authenticate(
-            CancellationSignal(),
-            mainExecutor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onSuccess()
-                override fun onAuthenticationError(code: Int, msg: CharSequence) {
-                    if (code != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED && code != BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
-                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
-        )
+        runCatching {
+            BiometricPrompt.Builder(this)
+                .setTitle(label)
+                .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL)
+                .build()
+                .authenticate(
+                    CancellationSignal(),
+                    mainExecutor,
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onSuccess()
+                        override fun onAuthenticationError(code: Int, msg: CharSequence) {
+                            if (code != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED && code != BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
+                                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                )
+        }.onFailure { e ->
+            // Never crash here: a crash would leave lending stuck on.
+            DiagLog.add(this, "auth", "prompt failed for $label: $e")
+            Toast.makeText(this, "Couldn't ask for your fingerprint", Toast.LENGTH_SHORT).show()
+        }
     }
 }

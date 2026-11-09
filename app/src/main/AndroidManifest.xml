@@ -17,6 +17,8 @@
     <!-- Overhead timer pill, and showing the time's-up sheet over the open app. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Fingerprint/PIN prompt for Vault apps and ending lending. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Still mode true grayscale; only via `adb shell pm grant`. -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
